@@ -1,0 +1,53 @@
+{
+  "type": "Feature",
+  "properties": {
+    "meta": {
+      "updated_at": "2026-06-28T08:00:00Z"
+    },
+    "timeseries": [
+      {
+        "time": "2026-06-28T09:00:00Z",
+        "data": {
+          "next_1_hours": {
+            "summary": {
+              "symbol_code": "rain"
+            },
+            "details": {
+              "probability_of_precipitation": 20,
+              "precipitation_amount": 0.4
+            }
+          }
+        }
+      },
+      {
+        "time": "2026-06-28T10:00:00Z",
+        "data": {
+          "next_1_hours": {
+            "summary": {
+              "symbol_code": "heavyrain"
+            },
+            "details": {
+              "probability_of_precipitation": 85,
+              "precipitation_amount": 3.0
+            }
+          }
+        }
+      },
+      {
+        "time": "2026-06-28T11:00:00Z",
+        "data": {
+          "next_1_hours": {
+            "summary": {
+              "symbol_code": "cloudy"
+            },
+            "details": {
+              "probability_of_precipitation": 5,
+              "precipitation_amount": 0.0
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+

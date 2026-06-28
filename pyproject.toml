@@ -1,0 +1,41 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["custom_components/rain_radar/tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+  "ASYNC",
+  "B",
+  "BLE",
+  "C4",
+  "DTZ",
+  "E",
+  "F",
+  "FA",
+  "I",
+  "ICN",
+  "ISC",
+  "LOG",
+  "N",
+  "PERF",
+  "PIE",
+  "PT",
+  "PTH",
+  "RET",
+  "RUF",
+  "SIM",
+  "T20",
+  "UP",
+  "W",
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+known-first-party = ["custom_components"]
+

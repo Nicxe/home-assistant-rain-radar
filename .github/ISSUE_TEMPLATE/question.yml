@@ -1,0 +1,22 @@
+name: Question
+description: Ask a support question about Rain Radar
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Integration
+        - Radar Card
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+

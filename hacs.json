@@ -1,0 +1,7 @@
+{
+  "name": "Rain Radar",
+  "country": ["SE", "NO", "DK", "FI"],
+  "zip_release": true,
+  "filename": "rain_radar.zip"
+}
+

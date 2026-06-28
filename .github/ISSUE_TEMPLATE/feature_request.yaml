@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an improvement for Rain Radar
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Integration
+        - Radar Card
+        - Provider support
+        - Documentation
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - MET Norway
+        - SMHI
+        - DMI
+        - Not provider-specific
+    validations:
+      required: true
+  - type: textarea
+    id: request
+    attributes:
+      label: What would you like Rain Radar to do?
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: Why is this useful?
+    validations:
+      required: true
+

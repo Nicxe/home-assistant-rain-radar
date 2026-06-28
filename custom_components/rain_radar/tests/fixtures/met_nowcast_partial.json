@@ -1,0 +1,22 @@
+{
+  "type": "Feature",
+  "properties": {
+    "meta": {
+      "updated_at": "2026-06-28T08:00:00Z",
+      "radar_coverage": "ok"
+    },
+    "timeseries": [
+      {
+        "time": "2026-06-28T08:10:00Z",
+        "data": {
+          "next_1_hours": {
+            "details": {
+              "precipitation_amount": 0.2
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+

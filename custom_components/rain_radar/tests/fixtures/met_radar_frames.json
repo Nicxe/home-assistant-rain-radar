@@ -1,0 +1,17 @@
+{
+  "frames": [
+    {
+      "time": "2026-06-28T08:00:00Z",
+      "url": "https://api.met.no/weatherapi/radar/2.0/?type=reflectivity&area=nordic&content=image&time=2026-06-28T08:00:00Z",
+      "type": "image",
+      "label": "08:00"
+    },
+    {
+      "time": "2026-06-28T08:15:00Z",
+      "url": "https://api.met.no/weatherapi/radar/2.0/?type=reflectivity&area=nordic&content=image&time=2026-06-28T08:15:00Z",
+      "type": "image",
+      "label": "08:15"
+    }
+  ]
+}
+

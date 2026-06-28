@@ -1,0 +1,31 @@
+{
+  "type": "Feature",
+  "properties": {
+    "meta": {
+      "updated_at": "2026-06-28T08:00:00Z"
+    },
+    "timeseries": [
+      {
+        "time": "2026-06-28T07:55:00Z",
+        "data": {
+          "instant": {
+            "details": {
+              "precipitation_rate": 0.0
+            }
+          }
+        }
+      },
+      {
+        "time": "2026-06-28T08:30:00Z",
+        "data": {
+          "instant": {
+            "details": {
+              "precipitation_rate": 0.0
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+

@@ -1,0 +1,25 @@
+{
+  "type": "Feature",
+  "properties": {
+    "meta": {
+      "updated_at": "2026-06-28T08:00:00Z"
+    },
+    "timeseries": [
+      {
+        "time": "2026-06-28T09:00:00Z",
+        "data": {
+          "next_1_hours": {
+            "summary": {
+              "symbol_code": "clearsky_day"
+            },
+            "details": {
+              "probability_of_precipitation": 0,
+              "precipitation_amount": 0.0
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+
