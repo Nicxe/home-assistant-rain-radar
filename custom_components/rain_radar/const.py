@@ -78,8 +78,4 @@ ATTR_STATUS = "status"
 
 def get_user_agent(hass: HomeAssistant | None = None) -> str:
     """Generate the MET Norway User-Agent header."""
-    from homeassistant.const import __version__ as ha_version
-
-    return (
-        f"HomeAssistant/{ha_version} home-assistant-rain-radar/{VERSION} {PROJECT_URL}"
-    )
+    return f"home-assistant-rain-radar/{VERSION} {PROJECT_URL}"

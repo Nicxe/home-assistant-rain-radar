@@ -137,3 +137,54 @@ async def test_radar_fixture_parses_frames() -> None:
     assert len(frames.frames) == 2
     assert frames.animation_url is not None
     assert frames.latest_time is not None
+
+
+@pytest.mark.asyncio
+async def test_radar_available_prefers_loadable_nordic_image_frames() -> None:
+    """Test MET radar availability ignores animation URLs with time parameters."""
+    provider = MetNoProvider(
+        FakeClient(
+            {
+                "met_no_radar_available": [
+                    {
+                        "params": {
+                            "area": "xband",
+                            "content": "image",
+                            "time": "2026-06-28T14:55:00Z",
+                            "type": "reflectivity",
+                        },
+                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=xband&content=image&time=2026-06-28T14%3A55%3A00Z&type=reflectivity",
+                    },
+                    {
+                        "params": {
+                            "area": "nordic",
+                            "content": "image",
+                            "time": "2026-06-28T14:50:00Z",
+                            "type": "reflectivity",
+                        },
+                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=nordic&content=image&time=2026-06-28T14%3A50%3A00Z&type=reflectivity",
+                    },
+                    {
+                        "params": {
+                            "area": "nordic",
+                            "content": "animation",
+                            "time": "2026-06-28T14:50:00Z",
+                            "type": "reflectivity",
+                        },
+                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=nordic&content=animation&time=2026-06-28T14%3A50%3A00Z&type=reflectivity",
+                    },
+                ]
+            }
+        )
+    )
+
+    frames = await provider.async_get_radar_frames(
+        Location(59.3293, 18.0686), _options()
+    )
+
+    assert len(frames.frames) == 1
+    assert frames.frames[0].url.endswith(
+        "content=image&time=2026-06-28T14%3A50%3A00Z&type=reflectivity"
+    )
+    assert frames.frames[0].time == datetime(2026, 6, 28, 14, 50, tzinfo=UTC)
+    assert frames.latest_time == datetime(2026, 6, 28, 14, 50, tzinfo=UTC)

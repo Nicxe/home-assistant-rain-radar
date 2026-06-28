@@ -319,9 +319,18 @@ def _parse_radar_frames(payload: dict[str, Any] | list[Any]) -> list[RadarFrame]
 
         if not isinstance(item, dict):
             continue
+        params = item.get("params")
+        if isinstance(params, dict) and (
+            params.get("content") != "image"
+            or params.get("area") != "nordic"
+            or params.get("type") != "reflectivity"
+        ):
+            continue
+
         url = item.get("url") or item.get("uri") or item.get("href")
         time = (
             _parse_datetime(item.get("time"))
+            or _parse_datetime(params.get("time") if isinstance(params, dict) else None)
             or _parse_datetime(item.get("valid_time"))
             or _parse_datetime(item.get("updated_at"))
         )
@@ -333,7 +342,11 @@ def _parse_radar_frames(payload: dict[str, Any] | list[Any]) -> list[RadarFrame]
             RadarFrame(
                 time=time,
                 url=url,
-                frame_type=str(item.get("type", "image")),
+                frame_type=str(
+                    params.get("content")
+                    if isinstance(params, dict) and params.get("content") is not None
+                    else item.get("type", "image")
+                ),
                 label=str(item.get("label")) if item.get("label") is not None else None,
             )
         )
