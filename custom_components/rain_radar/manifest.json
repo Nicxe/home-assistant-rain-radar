@@ -4,9 +4,9 @@
   "after_dependencies": ["lovelace"],
   "codeowners": ["@Nicxe"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/Nicxe/home-assistant-rain-radar",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Nicxe/home-assistant-rain-radar/issues",
   "version": "0.0.0"
 }
-
