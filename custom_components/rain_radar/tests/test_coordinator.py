@@ -75,6 +75,8 @@ async def test_coordinator_exposes_normalized_data(
         location=Location(59.3293, 18.0686),
         options=RainRadarOptions(
             contact="rain-radar@example.com",
+            forecast_provider="met_no",
+            radar_area="nordic",
             rain_threshold=0.1,
             rain_soon_window_minutes=60,
             sample_radius_m=1000,

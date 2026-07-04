@@ -3,17 +3,25 @@
     "step": {
       "user": {
         "title": "Rain Radar",
-        "description": "Set up rain radar and automation-ready rain sensors using MET Norway data.",
+        "description": "Set up Regnradar radar imagery with automation-ready rain forecast sensors.",
         "data": {
           "name": "Location name",
           "latitude": "Latitude",
           "longitude": "Longitude",
-          "provider": "Provider",
-          "contact": "Contact for MET Norway",
+          "forecast_provider": "Forecast provider",
+          "radar_area": "Radar area",
           "rain_threshold": "Rain threshold",
           "rain_soon_window": "Rain soon window",
           "sample_radius_m": "Sampling radius",
           "rain_risk_horizon_hours": "Rain risk horizon"
+        },
+        "data_description": {
+          "rain_threshold": "Minimum precipitation intensity in mm/h that counts as rain. This controls raining now, rain soon, and arrival calculations.",
+          "rain_soon_window": "How far ahead, in minutes, Rain Radar should look before turning on the rain soon binary sensor.",
+          "sample_radius_m": "Area around the configured location that forecast providers may use when sampling rain data. MET Norway currently uses point forecasts, so this is reserved for future provider improvements.",
+          "forecast_provider": "Provider used for rain arrival, rain soon, and rain risk sensors. Radar imagery always comes from Regnradar.",
+          "radar_area": "Regnradar image area used for the map overlay.",
+          "rain_risk_horizon_hours": "How many hours ahead to inspect for the rain risk sensor. The default 12 hours matches the previous MET Rain Risk behavior."
         }
       },
       "reload_notice": {
@@ -22,14 +30,15 @@
       }
     },
     "abort": {
-      "already_configured": "This provider and location are already configured.",
+      "already_configured": "This forecast provider and location are already configured.",
       "unknown": "The setup flow was interrupted. Start setup again."
     },
     "error": {
       "invalid_latitude": "Latitude must be between -90 and 90.",
       "invalid_longitude": "Longitude must be between -180 and 180.",
+      "unsupported_forecast_provider": "This forecast provider is not supported yet.",
       "unsupported_provider": "This provider is not supported yet.",
-      "invalid_contact": "Enter an email address or website URL so MET Norway can contact you if needed.",
+      "unsupported_radar_area": "This radar area is not supported.",
       "invalid_rain_threshold": "Rain threshold must be zero or higher.",
       "invalid_rain_soon_window": "Rain soon window must be between 5 and 120 minutes.",
       "invalid_sample_radius": "Sampling radius must be between 0 and 10000 meters.",
@@ -40,17 +49,25 @@
     "step": {
       "init": {
         "title": "Rain Radar options",
-        "description": "Update provider, location, contact, and rain thresholds.",
+        "description": "Update forecast provider, radar area, location, and rain thresholds.",
         "data": {
           "name": "Location name",
           "latitude": "Latitude",
           "longitude": "Longitude",
-          "provider": "Provider",
-          "contact": "Contact for MET Norway",
+          "forecast_provider": "Forecast provider",
+          "radar_area": "Radar area",
           "rain_threshold": "Rain threshold",
           "rain_soon_window": "Rain soon window",
           "sample_radius_m": "Sampling radius",
           "rain_risk_horizon_hours": "Rain risk horizon"
+        },
+        "data_description": {
+          "rain_threshold": "Minimum precipitation intensity in mm/h that counts as rain. This controls raining now, rain soon, and arrival calculations.",
+          "rain_soon_window": "How far ahead, in minutes, Rain Radar should look before turning on the rain soon binary sensor.",
+          "sample_radius_m": "Area around the configured location that forecast providers may use when sampling rain data. MET Norway currently uses point forecasts, so this is reserved for future provider improvements.",
+          "forecast_provider": "Provider used for rain arrival, rain soon, and rain risk sensors. Radar imagery always comes from Regnradar.",
+          "radar_area": "Regnradar image area used for the map overlay.",
+          "rain_risk_horizon_hours": "How many hours ahead to inspect for the rain risk sensor. The default 12 hours matches the previous MET Rain Risk behavior."
         }
       }
     }
@@ -71,4 +88,3 @@
     }
   }
 }
-

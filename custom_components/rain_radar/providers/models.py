@@ -37,6 +37,8 @@ class RainRadarOptions:
     """Runtime options used by providers."""
 
     contact: str
+    forecast_provider: str
+    radar_area: str
     rain_threshold: float
     rain_soon_window_minutes: int
     sample_radius_m: int
@@ -117,10 +119,39 @@ class RainRiskForecast:
 class RadarFrame:
     """Radar frame metadata for the dashboard card."""
 
+    frame_id: str
     time: datetime | None
-    url: str
+    source_url: str
+    image_cache_key: str
     frame_type: str = "image"
     label: str | None = None
+    content_type: str = "image/png"
+
+
+@dataclass(frozen=True, slots=True)
+class RadarImageSize:
+    """Radar image dimensions in pixels."""
+
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
+class RadarBounds:
+    """Geographic bounds for a radar image."""
+
+    south: float
+    west: float
+    north: float
+    east: float
+
+
+@dataclass(frozen=True, slots=True)
+class RadarColorStep:
+    """Radar color scale step."""
+
+    label: str
+    color: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +160,14 @@ class RadarFrameSet:
 
     frames: list[RadarFrame] = field(default_factory=list)
     animation_url: str | None = None
+    image_size: RadarImageSize = field(
+        default_factory=lambda: RadarImageSize(width=659, height=761)
+    )
+    bounds: RadarBounds | None = None
+    projection_id: str = "met_no_lambert_conformal_conic_nordic"
+    product_id: str = "5level_reflectivity"
+    overlay_mode: str = "precipitation_mask"
+    color_scale: list[RadarColorStep] = field(default_factory=list)
     latest_time: datetime | None = None
     updated_at: datetime | None = None
     attribution: str | None = None

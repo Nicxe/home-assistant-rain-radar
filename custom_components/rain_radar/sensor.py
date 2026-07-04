@@ -21,13 +21,16 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     ATTR_ENTRY_ID,
+    ATTR_FORECAST_PROVIDER_ID,
     ATTR_FORECAST_SAMPLES,
     ATTR_HOURLY,
     ATTR_IS_STALE,
     ATTR_LAST_UPDATED,
     ATTR_PROVIDER_ID,
+    ATTR_RADAR_PROVIDER_ID,
     ATTR_STATUS,
     ATTRIBUTION,
+    DEFAULT_RADAR_PROVIDER,
 )
 from .coordinator import RainRadarCoordinator, RainRadarData
 from .entity import RainRadarEntity
@@ -84,12 +87,16 @@ def _precipitation_attrs(data: RainRadarData) -> dict[str, Any]:
         ],
         ATTR_IS_STALE: data.precipitation.is_stale,
         ATTR_ENTRY_ID: data.provider_status.provider_id,
+        "rain_threshold": data.options.rain_threshold,
+        "rain_soon_window_minutes": data.options.rain_soon_window_minutes,
     }
 
 
 def _provider_attrs(data: RainRadarData) -> dict[str, Any]:
     return {
         ATTR_PROVIDER_ID: data.provider_status.provider_id,
+        ATTR_RADAR_PROVIDER_ID: DEFAULT_RADAR_PROVIDER,
+        ATTR_FORECAST_PROVIDER_ID: data.options.forecast_provider,
         ATTR_STATUS: data.provider_status.health.value,
         "coverage_status": data.provider_status.coverage_status.value,
         ATTRIBUTION: data.provider_status.attribution,

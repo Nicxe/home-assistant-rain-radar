@@ -13,25 +13,34 @@ import homeassistant.helpers.config_validation as cv
 
 from .api import RainRadarApiClient
 from .const import (
-    CONF_CONTACT,
+    CONF_FORECAST_PROVIDER,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_PROVIDER,
+    CONF_RADAR_AREA,
+    CONF_RADAR_PROVIDER,
     CONF_RAIN_RISK_HORIZON_HOURS,
     CONF_RAIN_SOON_WINDOW,
     CONF_RAIN_THRESHOLD,
     CONF_SAMPLE_RADIUS_M,
     DEFAULT_CONTACT,
+    DEFAULT_FORECAST_PROVIDER,
+    DEFAULT_PROVIDER,
+    DEFAULT_RADAR_AREA,
+    DEFAULT_RADAR_PROVIDER,
     DEFAULT_RAIN_RISK_HORIZON_HOURS,
     DEFAULT_RAIN_SOON_WINDOW,
     DEFAULT_RAIN_THRESHOLD,
     DEFAULT_SAMPLE_RADIUS_M,
     DOMAIN,
+    FORECAST_PROVIDER_OPTIONS,
     PLATFORMS,
 )
 from .coordinator import RainRadarCoordinator
 from .frontend import async_setup_frontend
 from .providers.met_no import MetNoProvider
 from .providers.models import Location, RainRadarOptions
+from .providers.regnradar import RegnradarProvider
 from .views import async_register_http_views
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,7 +53,7 @@ class RainRadarRuntimeData:
     """Runtime data for a Rain Radar config entry."""
 
     client: RainRadarApiClient
-    provider: MetNoProvider
+    provider: RegnradarProvider
     coordinator: RainRadarCoordinator
     options: RainRadarOptions
 
@@ -62,6 +71,22 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate legacy config entries."""
+    if entry.version > 2:
+        return False
+
+    if entry.version < 2:
+        hass.config_entries.async_update_entry(
+            entry,
+            data=_migrate_settings(entry.data),
+            options=_migrate_settings(entry.options),
+            version=2,
+        )
+
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: RainRadarConfigEntry) -> bool:
     """Set up Rain Radar from a config entry."""
     await async_setup_frontend(hass)
@@ -69,7 +94,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: RainRadarConfigEntry) ->
     options = _entry_options(hass, entry)
     location = _entry_location(hass, entry)
     client = RainRadarApiClient(hass, options.contact)
-    provider = MetNoProvider(client)
+    provider = _entry_provider(client, entry)
     coordinator = RainRadarCoordinator(
         hass,
         config_entry=entry,
@@ -126,11 +151,14 @@ def _entry_location(hass: HomeAssistant, entry: ConfigEntry) -> Location:
 
 def _entry_options(hass: HomeAssistant, entry: ConfigEntry) -> RainRadarOptions:
     return RainRadarOptions(
-        contact=str(
+        contact=DEFAULT_CONTACT,
+        forecast_provider=_entry_forecast_provider(entry),
+        radar_area=str(
             entry.options.get(
-                CONF_CONTACT, entry.data.get(CONF_CONTACT, DEFAULT_CONTACT)
+                CONF_RADAR_AREA,
+                entry.data.get(CONF_RADAR_AREA, DEFAULT_RADAR_AREA),
             )
-        ).strip(),
+        ),
         rain_threshold=float(
             entry.options.get(
                 CONF_RAIN_THRESHOLD,
@@ -159,3 +187,53 @@ def _entry_options(hass: HomeAssistant, entry: ConfigEntry) -> RainRadarOptions:
             )
         ),
     )
+
+
+def _entry_provider(
+    client: RainRadarApiClient,
+    entry: ConfigEntry,
+) -> RegnradarProvider:
+    return RegnradarProvider(
+        client,
+        forecast_provider=_forecast_provider_for(
+            client, _entry_forecast_provider(entry)
+        ),
+    )
+
+
+def _entry_forecast_provider(entry: ConfigEntry) -> str:
+    value = str(
+        entry.options.get(
+            CONF_FORECAST_PROVIDER,
+            entry.data.get(CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER),
+        )
+    )
+    if value in FORECAST_PROVIDER_OPTIONS:
+        return value
+    return DEFAULT_FORECAST_PROVIDER
+
+
+def _forecast_provider_for(
+    client: RainRadarApiClient,
+    provider_id: str,
+) -> MetNoProvider:
+    if provider_id == DEFAULT_FORECAST_PROVIDER:
+        return MetNoProvider(client)
+    return MetNoProvider(client)
+
+
+def _migrate_settings(settings) -> dict:
+    migrated = dict(settings)
+    legacy_provider = str(migrated.pop(CONF_PROVIDER, DEFAULT_PROVIDER))
+    forecast_provider = str(
+        migrated.get(CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER)
+    )
+    if forecast_provider not in FORECAST_PROVIDER_OPTIONS:
+        forecast_provider = DEFAULT_FORECAST_PROVIDER
+    if legacy_provider not in FORECAST_PROVIDER_OPTIONS:
+        legacy_provider = DEFAULT_FORECAST_PROVIDER
+
+    migrated[CONF_FORECAST_PROVIDER] = forecast_provider or legacy_provider
+    migrated[CONF_RADAR_PROVIDER] = DEFAULT_RADAR_PROVIDER
+    migrated.setdefault(CONF_RADAR_AREA, DEFAULT_RADAR_AREA)
+    return migrated

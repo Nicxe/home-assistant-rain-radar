@@ -8,7 +8,15 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import RainRadarConfigEntry
-from .const import CONF_CONTACT, CONF_LATITUDE, CONF_LONGITUDE
+from .const import (
+    CONF_CONTACT,
+    CONF_FORECAST_PROVIDER,
+    CONF_LATITUDE,
+    CONF_LONGITUDE,
+    CONF_RADAR_PROVIDER,
+    DEFAULT_FORECAST_PROVIDER,
+    DEFAULT_RADAR_PROVIDER,
+)
 
 TO_REDACT = {CONF_CONTACT}
 
@@ -51,6 +59,12 @@ async def async_get_config_entry_diagnostics(
                 "health": coordinator_data.provider_status.health.value
                 if coordinator_data
                 else None,
+                "radar_provider": DEFAULT_RADAR_PROVIDER
+                if coordinator_data
+                else data.get(CONF_RADAR_PROVIDER, DEFAULT_RADAR_PROVIDER),
+                "forecast_provider": coordinator_data.options.forecast_provider
+                if coordinator_data
+                else data.get(CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER),
                 "last_error": coordinator.last_error_type if coordinator else None,
             },
             "data": {

@@ -173,6 +173,36 @@ async def test_setup_frontend_refreshes_card_after_integration_reload(
     assert fake_hass.data[FRONTEND_DATA_KEY]["cache_key"] == "0.0.0-new"
 
 
+@pytest.mark.asyncio
+async def test_card_sync_runs_filesystem_work_in_executor(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Test frontend asset sync keeps blocking filesystem work in the executor."""
+    executor_calls = []
+
+    def _fake_sync_frontend_assets(www_path: str) -> None:
+        assert www_path == str(tmp_path / "www")
+
+    async def _fake_executor(func, *args):
+        executor_calls.append((func, args))
+        return func(*args)
+
+    fake_hass = SimpleNamespace(
+        config=SimpleNamespace(path=lambda path: str(tmp_path / path)),
+        async_add_executor_job=_fake_executor,
+    )
+    monkeypatch.setattr(
+        frontend,
+        "_sync_frontend_assets_to_local_www",
+        _fake_sync_frontend_assets,
+    )
+
+    await frontend._async_sync_card_to_local_www(fake_hass)
+
+    assert executor_calls == [(_fake_sync_frontend_assets, (str(tmp_path / "www"),))]
+
+
 def test_bundled_card_registers_custom_card() -> None:
     """Test card custom element registration strings."""
     card_text = Path(frontend._card_file_path()).read_text(encoding="utf-8")
@@ -182,10 +212,131 @@ def test_bundled_card_registers_custom_card() -> None:
     assert "type: CARD_TYPE" in card_text
 
 
-def test_bundled_card_has_no_remote_cdn_imports() -> None:
-    """Test card does not import remote JavaScript."""
+def test_bundled_card_exposes_layer_and_forecast_options() -> None:
+    """Test card includes configurable map layers and forecast availability display."""
     card_text = Path(frontend._card_file_path()).read_text(encoding="utf-8")
 
-    assert "import " not in card_text
+    assert "show_legend: false" in card_text
+    assert "show_info_panel: false" in card_text
+    assert "show_location_marker: true" in card_text
+    assert "show_forecast: true" in card_text
+    assert "tile_url: DEFAULT_TILE_URL" in card_text
+    assert "tile_attribution: DEFAULT_TILE_ATTRIBUTION" in card_text
+    assert "rainSoonStatus" in card_text
+    assert "locationNameFromEntity" in card_text
+    assert (
+        'this.shadowRoot.querySelector(".name").textContent = status.label' in card_text
+    )
+    assert 'badge.querySelector("span").textContent = status.label' in card_text
+    assert 'friendly_name || "Rain Radar"' not in card_text
+    assert "coverage_opacity: DEFAULT_COVERAGE_OPACITY" in card_text
+    assert "animation_interval_ms: DEFAULT_ANIMATION_INTERVAL_MS" in card_text
+    assert "arrival_format: DEFAULT_ARRIVAL_FORMAT" in card_text
+    assert "arrivalText" in card_text
+    assert "minuteValue" in card_text
+    assert "durationMinutes" in card_text
+    assert "clockTimeAfterMinutes" in card_text
+    assert "arrivalMinutesFromForecastSamples" in card_text
+    assert "const arrivalState = stateText(arrival, null)" in card_text
+    assert "const arrivalMinutes = arrival" in card_text
+    assert "? minuteValue(arrivalState)" in card_text
+    assert "context.arrivalMinutes" in card_text
+    assert "const minutes = Number(value)" not in card_text
+    assert 'name="arrival_format"' in card_text
+    assert 'value="duration_time"' in card_text
+    assert "buildTimelineFrames" in card_text
+    assert "radarFrameType" in card_text
+    assert "isObservedRadarFrame" in card_text
+    assert '["fcst", "forecast"].includes(radarFrameType(frame))' in card_text
+    assert "latestRadarText" in card_text
+    assert "latest-radar-metric" in card_text
+    assert "latestRadarMetric.hidden = !latestRadar" in card_text
+    assert "stateText(radarTime, null)" in card_text
+    assert "availableForecastMinutes" in card_text
+    assert "if (!Number.isFinite(sample.rate)) break" in card_text
+    assert "Forecast data +${context.forecastMinutesAvailable} min" in card_text
+    assert "has-forecast" in card_text
+    assert "repeating-linear-gradient" in card_text
+    assert "forecastSegment.hidden = !hasForecast" in card_text
+    assert (
+        'forecastSegment.title = "Point forecast data, not radar imagery"' in card_text
+    )
+    assert "locationFromPayload" in card_text
+    assert "boundsFromPayload" in card_text
+    assert "Forecast +60 min" not in card_text
+    assert "latestObserved.imageUrl" not in card_text
+    assert "latestObserved.id" not in card_text
+    assert "Show forecast availability" in card_text
+    assert "Extend timeline with forecast" not in card_text
+
+
+def test_bundled_card_uses_leaflet_osm_map_with_provider_overlays() -> None:
+    """Test card uses an interactive Leaflet OSM map and provider radar overlays."""
+    card_text = Path(frontend._card_file_path()).read_text(encoding="utf-8")
+
+    assert "/local/rain_radar/vendor/leaflet/leaflet.css" in card_text
+    assert "/local/rain_radar/vendor/leaflet/leaflet-src.esm.js" in card_text
+    assert "L.tileLayer" in card_text
+    assert "L.imageOverlay" in card_text
+    assert "L.layerGroup" in card_text
+    assert "L.rectangle" in card_text
+    assert "WEB_MERCATOR_WORLD_BOUNDS" in card_text
+    assert "rain-radar-outside-coverage" in card_text
+    assert "_syncOutsideCoverageLayer" in card_text
+    assert "_removeOutsideCoverageLayer" in card_text
+    assert "canvasMaskRadarOverlayToObjectUrl" in card_text
+    assert "canvasSoftenRegnradarCoverageToObjectUrl" in card_text
+    assert "isFiveLevelReflectivityPixel" in card_text
+    assert "isRegnradarCoverageShadePixel" in card_text
+    assert "RADAR_OVERLAY_CACHE_LIMIT" in card_text
+    assert "_prepareOverlayUrl" in card_text
+    assert "_preloadUpcomingOverlays" in card_text
+    assert "_waitForLayerLoad" in card_text
+    assert "overlayMode: payload.overlay_mode" in card_text
+    assert "regnradar_coverage" in card_text
+    assert "URL.revokeObjectURL" in card_text
+    assert "this._animationIntervalMs()" in card_text
+    assert "DEFAULT_ANIMATION_INTERVAL_MS = 550" in card_text
+    assert 'min="250"' in card_text
+    assert "1150" not in card_text
+    assert "Radar: Regnradar/Vackertväder" in card_text
+    assert "scrollWheelZoom: this._config.map_scroll_wheel === true" in card_text
+    assert 'MAP_TILE_REFERRER_POLICY = "strict-origin-when-cross-origin"' in card_text
+    assert "referrerPolicy: MAP_TILE_REFERRER_POLICY" in card_text
+    assert "interactive: false" in card_text
+    assert "tile.openstreetmap.org" in card_text
+    assert "L.CRS.Simple" not in card_text
+    assert "RADAR_PIXEL_TRANSFORM" not in card_text
     assert "unpkg.com" not in card_text
     assert "cdn.jsdelivr.net" not in card_text
+    assert "regnradar.se" not in card_text.lower()
+
+
+def test_bundled_card_crossfades_after_next_layer_loads() -> None:
+    """Test frame changes do not fade out the current layer before the next one loads."""
+    card_text = Path(frontend._card_file_path()).read_text(encoding="utf-8")
+
+    assert (
+        'if (!this._radarLayer) {\n      this._showMapStatus("Loading radar layer");'
+        in card_text
+    )
+    assert "const layerLoaded = this._waitForLayerLoad(nextLayer)" in card_text
+    assert "nextLayer.addTo(this._map)" in card_text
+    assert "await this._withTimeout(" in card_text
+    assert 'nextLayer.once("load", fadeIn)' not in card_text
+    assert "requestAnimationFrame(fadeIn)" not in card_text
+
+    layer_load_index = card_text.index(
+        "const layerLoaded = this._waitForLayerLoad(nextLayer)"
+    )
+    fade_out_index = card_text.index("previousLayer?.setOpacity(0)")
+    assert layer_load_index < fade_out_index
+
+
+def test_bundled_leaflet_assets_exist() -> None:
+    """Test Leaflet runtime assets are bundled locally."""
+    asset_root = Path(frontend._card_file_path()).parent / "vendor" / "leaflet"
+
+    assert (asset_root / "leaflet.css").is_file()
+    assert (asset_root / "leaflet.js").is_file()
+    assert (asset_root / "leaflet-src.esm.js").is_file()
