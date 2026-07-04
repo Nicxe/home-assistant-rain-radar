@@ -31,6 +31,8 @@ class FakeClient:
 def _options() -> RainRadarOptions:
     return RainRadarOptions(
         contact="rain-radar@example.com",
+        forecast_provider="met_no",
+        radar_area="nordic",
         rain_threshold=0.1,
         rain_soon_window_minutes=60,
         sample_radius_m=1000,
@@ -137,6 +139,15 @@ async def test_radar_fixture_parses_frames() -> None:
     assert len(frames.frames) == 2
     assert frames.animation_url is not None
     assert frames.latest_time is not None
+    assert frames.bounds is not None
+    assert frames.bounds.south == pytest.approx(52.295184)
+    assert frames.product_id == "5level_reflectivity"
+    assert (
+        frames.frames[0].frame_id
+        == "met-no-nordic-5level-reflectivity-20260628T080000Z"
+    )
+    assert frames.frames[0].source_url.startswith("https://api.met.no/")
+    assert frames.frames[0].image_cache_key.startswith("met_no_radar_image_")
 
 
 @pytest.mark.asyncio
@@ -151,27 +162,45 @@ async def test_radar_available_prefers_loadable_nordic_image_frames() -> None:
                             "area": "xband",
                             "content": "image",
                             "time": "2026-06-28T14:55:00Z",
-                            "type": "reflectivity",
+                            "type": "5level_reflectivity",
                         },
-                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=xband&content=image&time=2026-06-28T14%3A55%3A00Z&type=reflectivity",
+                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=xband&content=image&time=2026-06-28T14%3A55%3A00Z&type=5level_reflectivity",
                     },
                     {
                         "params": {
                             "area": "nordic",
                             "content": "image",
                             "time": "2026-06-28T14:50:00Z",
-                            "type": "reflectivity",
+                            "type": "5level_reflectivity",
                         },
-                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=nordic&content=image&time=2026-06-28T14%3A50%3A00Z&type=reflectivity",
+                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=nordic&content=image&time=2026-06-28T14%3A50%3A00Z&type=5level_reflectivity",
                     },
                     {
                         "params": {
                             "area": "nordic",
                             "content": "animation",
                             "time": "2026-06-28T14:50:00Z",
+                            "type": "5level_reflectivity",
+                        },
+                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=nordic&content=animation&time=2026-06-28T14%3A50%3A00Z&type=5level_reflectivity",
+                    },
+                    {
+                        "params": {
+                            "area": "nordic",
+                            "content": "image",
+                            "time": "2026-06-28T14:45:00Z",
                             "type": "reflectivity",
                         },
-                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=nordic&content=animation&time=2026-06-28T14%3A50%3A00Z&type=reflectivity",
+                        "uri": "https://api.met.no/weatherapi/radar/2.0/?area=nordic&content=image&time=2026-06-28T14%3A45%3A00Z&type=reflectivity",
+                    },
+                    {
+                        "params": {
+                            "area": "nordic",
+                            "content": "image",
+                            "time": "2026-06-28T14:40:00Z",
+                            "type": "5level_reflectivity",
+                        },
+                        "uri": "https://example.com/not-a-radar-image.png",
                     },
                 ]
             }
@@ -183,8 +212,50 @@ async def test_radar_available_prefers_loadable_nordic_image_frames() -> None:
     )
 
     assert len(frames.frames) == 1
-    assert frames.frames[0].url.endswith(
-        "content=image&time=2026-06-28T14%3A50%3A00Z&type=reflectivity"
+    assert frames.frames[0].source_url.endswith(
+        "content=image&time=2026-06-28T14%3A50%3A00Z&type=5level_reflectivity"
     )
     assert frames.frames[0].time == datetime(2026, 6, 28, 14, 50, tzinfo=UTC)
     assert frames.latest_time == datetime(2026, 6, 28, 14, 50, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_radar_locations_json_overrides_fallback_bounds() -> None:
+    """Test MET radar locations JSON is used for map bounds."""
+    provider = MetNoProvider(
+        FakeClient(
+            {
+                "met_no_radar_available": load_fixture("met_radar_frames.json"),
+                "met_no_radar_locations": {
+                    "features": [
+                        {
+                            "id": "nordic",
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [
+                                    [
+                                        [3.0, 52.0],
+                                        [41.0, 52.0],
+                                        [41.0, 72.0],
+                                        [3.0, 72.0],
+                                        [3.0, 52.0],
+                                    ]
+                                ],
+                            },
+                            "properties": {"id": "nordic"},
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    frames = await provider.async_get_radar_frames(
+        Location(59.3293, 18.0686), _options()
+    )
+
+    assert frames.bounds is not None
+    assert frames.bounds.south == 52.0
+    assert frames.bounds.west == 3.0
+    assert frames.bounds.north == 72.0
+    assert frames.bounds.east == 41.0

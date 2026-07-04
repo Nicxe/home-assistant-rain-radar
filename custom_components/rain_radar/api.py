@@ -33,10 +33,11 @@ class RainRadarApiRateLimitedError(RainRadarApiError):
 
 @dataclass(slots=True)
 class _CachedResponse:
-    """Cached JSON response and HTTP cache validators."""
+    """Cached response and HTTP cache validators."""
 
-    payload: dict[str, Any] | list[Any]
+    payload: dict[str, Any] | list[Any] | bytes
     metadata: CacheMetadata
+    content_type: str | None = None
 
 
 class RainRadarApiClient:
@@ -57,9 +58,14 @@ class RainRadarApiClient:
         """Update configured provider contact."""
         self._contact = contact.strip()
 
-    def _headers(self, cache_key: str | None = None) -> dict[str, str]:
+    def _headers(
+        self,
+        cache_key: str | None = None,
+        *,
+        accept: str = "application/json",
+    ) -> dict[str, str]:
         headers = {
-            "Accept": "application/json",
+            "Accept": accept,
             "User-Agent": get_user_agent(self.hass),
         }
         if self._contact:
@@ -103,6 +109,10 @@ class RainRadarApiClient:
                         self._cache[cache_key] = _CachedResponse(
                             cached.payload, metadata
                         )
+                        if not isinstance(cached.payload, (dict, list)):
+                            raise RainRadarApiError(
+                                f"{url} returned cached non-JSON data"
+                            )
                         return cached.payload, metadata
 
                     await self._raise_for_status(response, url)
@@ -116,6 +126,62 @@ class RainRadarApiClient:
         self._cache[cache_key] = _CachedResponse(payload, metadata)
         return payload, metadata
 
+    async def async_get_bytes(
+        self,
+        cache_key: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        request_timeout: int = 15,
+        accept: str = "image/png",
+    ) -> tuple[bytes, CacheMetadata, str]:
+        """Fetch bytes and reuse cached payload on 304 responses."""
+        session = aiohttp_client.async_get_clientsession(self.hass)
+        headers = self._headers(cache_key, accept=accept)
+
+        try:
+            async with asyncio.timeout(request_timeout):
+                async with session.get(url, params=params, headers=headers) as response:
+                    if response.status == 304:
+                        cached = self._cache.get(cache_key)
+                        if cached is None:
+                            raise RainRadarApiError(
+                                f"{url} returned 304 without cached data"
+                            )
+                        if not isinstance(cached.payload, bytes):
+                            raise RainRadarApiError(
+                                f"{url} returned cached non-binary data"
+                            )
+                        metadata = CacheMetadata(
+                            fetched_at=datetime.now(UTC),
+                            expires_at=cached.metadata.expires_at,
+                            etag=cached.metadata.etag,
+                            last_modified=cached.metadata.last_modified,
+                            from_cache=True,
+                        )
+                        self._cache[cache_key] = _CachedResponse(
+                            cached.payload, metadata, cached.content_type
+                        )
+                        return (
+                            cached.payload,
+                            metadata,
+                            cached.content_type or "application/octet-stream",
+                        )
+
+                    await self._raise_for_status(response, url)
+                    payload = await response.read()
+                    metadata = _cache_metadata_from_response(response)
+                    content_type = response.headers.get(
+                        "Content-Type", "application/octet-stream"
+                    ).split(";", 1)[0]
+        except TimeoutError as err:
+            raise RainRadarApiError(f"Timed out fetching {url}") from err
+        except ClientError as err:
+            raise RainRadarApiError(f"Error fetching {url}: {err}") from err
+
+        self._cache[cache_key] = _CachedResponse(payload, metadata, content_type)
+        return payload, metadata, content_type
+
     async def _raise_for_status(self, response: ClientResponse, url: str) -> None:
         if response.status == 200:
             return
@@ -124,11 +190,11 @@ class RainRadarApiClient:
         body = text[:300]
         if response.status in (401, 403):
             raise RainRadarApiAuthError(
-                f"MET Norway rejected the request for {url}: HTTP {response.status}"
+                f"Provider rejected the request for {url}: HTTP {response.status}"
             )
         if response.status == 429:
             raise RainRadarApiRateLimitedError(
-                f"MET Norway rate limited the request for {url}"
+                f"Provider rate limited the request for {url}"
             )
 
         _LOGGER.debug(

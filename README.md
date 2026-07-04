@@ -1,28 +1,31 @@
 # Rain Radar
 
-[![GitHub release](https://img.shields.io/github/v/release/Nicxe/home-assistant-rain-radar)](https://github.com/Nicxe/home-assistant-rain-radar/releases)
-[![Downloads](https://img.shields.io/github/downloads/Nicxe/home-assistant-rain-radar/total)](https://github.com/Nicxe/home-assistant-rain-radar/releases)
-[![Support](https://img.shields.io/badge/support-GitHub%20Issues-blue)](https://github.com/Nicxe/home-assistant-rain-radar/issues)
 
-## Overview
+[![Buy me a Coffee](https://img.shields.io/badge/Support-Buy%20me%20a%20coffee-fdd734?logo=buy-me-a-coffee)](https://www.buymeacoffee.com/NiklasV) 
 
-Rain Radar is a custom Home Assistant integration for Nordic rain monitoring. The first release uses MET Norway data and includes both native Home Assistant entities for automations and a bundled Lovelace card for dashboards.
+[![Last commit](https://img.shields.io/github/last-commit/Nicxe/home-assistant-rain-radar)](#) [![Version](https://img.shields.io/github/v/release/Nicxe/home-assistant-rain-radar)](#) ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/nicxe/home-assistant-rain-radar/latest/total)
+
+
+Rain Radar is a custom Home Assistant integration for Nordic rain monitoring. It combines Regnradar radar imagery with MET Norway point forecasts so dashboards and automations can answer practical questions such as whether it is raining now, whether rain is expected soon, and how high the rain risk is in the next hours.
+
+The integration includes Home Assistant entities, a config flow, options flow, diagnostics, localized Home Assistant setup text, authenticated radar image endpoints, and a bundled Lovelace dashboard card.
 
 ## Features
 
-- See whether it is raining at your configured location.
-- See whether rain is expected soon inside your configured forecast window.
-- Get an estimated number of minutes until rain arrives.
-- Track current precipitation intensity in mm/h.
-- Track data freshness and active provider attribution.
-- Use `sensor.<name>_rain_risk_12h` for the highest precipitation probability in the next 12 hours, migrated from MET Rain Risk.
-- Add the bundled `rain-radar-card` to a dashboard without installing a separate card repository.
+- Monitor current rain intensity at a configured location.
+- Detect when rain is expected inside a configurable look-ahead window.
+- Estimate how many minutes remain until rain arrives.
+- Track the highest forecast rain probability for the configured horizon.
+- Show radar frames, coverage, forecast markers, and location context in the bundled dashboard card.
+- Use radar coverage, data age, provider status, and latest radar time as diagnostic signals.
+- Configure one or more locations through the Home Assistant UI.
+- Keep the card bundled with the integration, with no separate frontend repository required.
 
-## Data Sources And Attribution
+## Data Sources
 
-The first implementation uses open data from [MET Norway](https://api.met.no/). Rain Radar sends an identifying User-Agent and the contact string you configure during setup, as requested by MET Norway.
+Radar imagery comes from [Regnradar/Vackertväder](https://regnradar.se/). Forecast-based entities currently use open data from [MET Norway](https://api.met.no/).
 
-SMHI and DMI are documented as future provider options, but they are not implemented in the first release. Regnradar.se is not used as a data source.
+Regnradar is used for the radar map overlay. MET Norway is currently the only selectable forecast provider for rain arrival, rain soon, precipitation, and rain risk calculations. SMHI and DMI forecast providers are planned for future releases but are not active yet.
 
 ## Installation
 
@@ -42,7 +45,7 @@ Rain Radar is not a HACS default repository yet. Install it as a custom reposito
 
 ### Manual Installation
 
-Download `rain_radar.zip` from the latest GitHub release. Extract it and place the `rain_radar` folder in `config/custom_components/`, then restart Home Assistant.
+Download `rain_radar.zip` from the latest GitHub release. Extract the archive and place the `rain_radar` folder in `config/custom_components/`, then restart Home Assistant.
 
 ## Configuration
 
@@ -50,66 +53,101 @@ Set up Rain Radar through Settings > Devices & services > Add Integration > Rain
 
 [![Open your Home Assistant instance and start configuring Rain Radar](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start?domain=rain_radar)
 
-Configuration fields:
+| Field | Default | Notes |
+| --- | --- | --- |
+| Location name | `Home` | Used as the base name for the created entities. |
+| Latitude | Home Assistant latitude | Must be between `-90` and `90`. |
+| Longitude | Home Assistant longitude | Must be between `-180` and `180`. |
+| Forecast provider | MET Norway | Used for rain arrival, rain soon, precipitation, and rain risk. |
+| Radar area | Nordic | Regnradar area used for radar frames and map coverage. |
+| Rain threshold | `0.1` mm/h | Minimum intensity that counts as rain. |
+| Rain soon window | `60` minutes | Look-ahead window for the rain soon binary sensor. |
+| Sampling radius | `1000` meters | Reserved for provider strategies. MET Norway currently uses point forecasts. |
+| Rain risk horizon | `12` hours | Forecast horizon inspected by the rain risk sensor. |
 
-- Location name, used for entity names.
-- Latitude and longitude, defaulting to your Home Assistant location.
-- Provider, currently MET Norway.
-- Contact for MET Norway, required for API identification.
-- Rain threshold in mm/h.
-- Rain soon forecast window in minutes.
-- Sampling radius, reserved for provider strategies.
-- Rain risk horizon, defaulting to 12 hours for MET Rain Risk compatibility.
+The same values can be changed later from the integration options. Setup and options text is available in English, Swedish, Finnish, Norwegian Bokmål, and Danish.
 
 ## Entities
 
-Rain Radar creates these entities for each configured location:
+Rain Radar creates these entities for each configured location. Entity IDs use the configured location name by default, but Home Assistant may adjust them to avoid duplicates.
 
-- `binary_sensor.<name>_raining_now`: on when current precipitation is at or above the threshold.
-- `binary_sensor.<name>_rain_soon`: on when rain is expected inside the configured forecast window.
-- `binary_sensor.<name>_radar_coverage`: on when radar coverage is available.
-- `sensor.<name>_precipitation_now`: current precipitation intensity in mm/h.
-- `sensor.<name>_rain_risk_12h`: highest precipitation probability in the next 12 hours.
-- `sensor.<name>_rain_arrival`: minutes until rain is expected, if known.
-- `sensor.<name>_data_age`: age of the newest available data.
-- `sensor.<name>_provider`: active provider name.
-- `sensor.<name>_latest_radar_time`: timestamp of the latest radar frame when available.
+| Entity | Type | State | Main attributes |
+| --- | --- | --- | --- |
+| `binary_sensor.<name>_raining_now` | Binary sensor | `on` when current precipitation is at or above the threshold | Attribution, entry ID, stale status |
+| `binary_sensor.<name>_rain_soon` | Binary sensor | `on` when rain is expected inside the configured window | Attribution, entry ID, stale status |
+| `binary_sensor.<name>_radar_coverage` | Binary sensor | `on` when radar coverage is available | Attribution, entry ID, stale status |
+| `sensor.<name>_precipitation_now` | Sensor | Current precipitation intensity in mm/h | Forecast samples, threshold, window, stale status |
+| `sensor.<name>_rain_risk_12h` | Sensor | Highest precipitation probability in percent | Hourly probability, precipitation amount, symbol code, update status |
+| `sensor.<name>_rain_arrival` | Sensor | Minutes until expected rain, when known | Attribution and entry ID |
+| `sensor.<name>_data_age` | Sensor | Age of the newest available data in minutes | Attribution and entry ID |
+| `sensor.<name>_provider` | Sensor | Active provider name | Provider IDs, status, coverage status, attribution |
+| `sensor.<name>_latest_radar_time` | Sensor | Timestamp of the latest radar frame | Attribution and entry ID |
 
-The rain-risk sensor includes bounded hourly details with time, probability, precipitation amount, and symbol code. Raw provider payloads are not stored as entity attributes.
+Raw provider payloads are not stored as entity attributes. Forecast details are bounded to the values needed by dashboards and automations.
 
 ## Dashboard Card
 
-The `rain-radar-card` is bundled with the integration. On startup, Rain Radar syncs the card to `config/www/rain-radar-card.js` and registers a Lovelace resource like `/local/rain-radar-card.js?v=...` as a JavaScript module.
+The `rain-radar-card` is bundled with the integration. On startup, Rain Radar copies the bundled frontend assets to `config/www`, registers `/local/rain-radar-card.js?v=...` as a Lovelace JavaScript module, and exposes authenticated radar frame endpoints for the card.
 
-After install or update, reload your browser once if the card is not visible immediately.
+After installing or updating the integration, reload your browser once if the card is not visible immediately.
 
-## Card Usage
+Add the card through the dashboard UI editor and choose `Rain Radar Card`. The editor includes an entity selector, so select one of the Rain Radar entities for the location you want to show. `binary_sensor.<name>_rain_soon` is a good default because the card can find companion Rain Radar entities from the same integration entry.
 
-Add the card through the dashboard UI editor and choose `Rain Radar Card`, or use manual YAML:
+Minimal YAML:
 
 ```yaml
 type: custom:rain-radar-card
 entity: binary_sensor.home_rain_soon
 ```
 
-Optional card settings:
+Common card options:
 
 ```yaml
 type: custom:rain-radar-card
 entity: binary_sensor.home_rain_soon
+title: Rain risk
+show_icon: true
+show_status: true
+show_precipitation: true
+show_arrival: true
+show_risk: true
+show_latest_radar: true
+show_provider: true
+show_coverage: true
 show_timeline: true
+show_map: true
 show_status_strip: true
-height: 360
+show_location_marker: true
+show_forecast: true
+map_zoom_controls: true
+map_scroll_wheel: false
+forecast_minutes: 60
+arrival_format: auto
+height: 420
 ```
 
-## Manual Card Fallback
+The card supports an expandable details section. Summary rows can stay visible, individual metadata rows can be enabled or disabled, and the map can be hidden when only the summary is needed.
 
-Manual Lovelace resource setup should only be needed for troubleshooting:
+The metadata row order can be customized with `meta_order`. Use `divider` to separate always-visible summary rows from rows that belong under the expandable details section.
 
-- URL: `/local/rain-radar-card.js`
-- Type: `JavaScript Module`
+```yaml
+type: custom:rain-radar-card
+entity: binary_sensor.home_rain_soon
+meta_order:
+  - status
+  - arrival
+  - precipitation
+  - risk
+  - divider
+  - latest_radar
+  - coverage
+  - provider
+  - forecast
+  - timeline
+  - map
+```
 
-Do not edit Home Assistant `.storage` files directly.
+Manual Lovelace resource setup should only be needed for troubleshooting. If you add it manually, use URL `/local/rain-radar-card.js` and type `JavaScript Module`. Do not edit Home Assistant `.storage` files directly.
 
 ## Automation Examples
 
@@ -155,39 +193,8 @@ actions:
 mode: single
 ```
 
-## Migration From MET Rain Risk
 
-The MET Rain Risk functionality is included in Rain Radar. The old integration domain was `met_rain_risk`; the new domain is `rain_radar`, so entity IDs change and automations or dashboards must be updated manually.
-
-Typical replacement:
-
-```yaml
-entity_id: sensor.home_rain_risk_12h
-```
-
-If your old entity had a different location name, use the new Rain Radar entity ID shown in Home Assistant after setup.
-
-## Troubleshooting
-
-If the card does not appear, restart Home Assistant once and reload the browser. Confirm that the Lovelace resource exists as `/local/rain-radar-card.js?v=...` and is registered as a JavaScript module.
-
-If entities are unavailable, check that your location is inside provider coverage and that the MET Norway contact field contains an email address or website URL. Provider rate limits and temporary MET outages are surfaced as unavailable or stale data instead of hidden values.
-
-Enable debug logging for `custom_components.rain_radar` if you need more detail while reporting an issue.
-
-## Screenshots
-
-Screenshot placeholders will be replaced after the first public release is validated in a real dashboard.
-
-## Release Assets And Versioning
-
-Each release publishes `rain_radar.zip`. The bundled dashboard card is included inside the integration zip, and the integration and card share one version.
-
-## Planned Provider Improvements
-
-SMHI is planned as a future provider for stronger Sweden-specific radar support. DMI is planned as a future provider for Denmark and nearby southern Nordic use cases. Both require separate provider research and are intentionally not included in the first MET Norway release.
 
 ## Contributing
 
-Use GitHub issues for bug reports, feature requests, and support questions. Pull requests should include relevant tests and should keep user-facing text in English.
-
+Use GitHub issues for bug reports, feature requests, and support questions. Pull requests should include relevant tests and keep user-facing text in English.

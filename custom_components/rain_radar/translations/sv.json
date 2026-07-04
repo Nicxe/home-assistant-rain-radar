@@ -3,72 +3,88 @@
     "step": {
       "user": {
         "title": "Rain Radar",
-        "description": "Set up rain radar and automation-ready rain sensors using MET Norway data.",
+        "description": "Ställ in Regnradars radarbilder med regnprognossensorer som är redo för automatiseringar.",
         "data": {
-          "name": "Location name",
-          "latitude": "Latitude",
-          "longitude": "Longitude",
-          "provider": "Provider",
-          "contact": "Contact for MET Norway",
-          "rain_threshold": "Rain threshold",
-          "rain_soon_window": "Rain soon window",
-          "sample_radius_m": "Sampling radius",
-          "rain_risk_horizon_hours": "Rain risk horizon"
+          "name": "Platsnamn",
+          "latitude": "Latitud",
+          "longitude": "Longitud",
+          "forecast_provider": "Prognosleverantör",
+          "radar_area": "Radarområde",
+          "rain_threshold": "Regntröskel",
+          "rain_soon_window": "Tidsfönster för regn snart",
+          "sample_radius_m": "Samplingsradie",
+          "rain_risk_horizon_hours": "Tidshorisont för regnrisk"
+        },
+        "data_description": {
+          "rain_threshold": "Minsta nederbördsintensitet i mm/h som räknas som regn. Detta styr regn just nu, regn snart och beräkningar av när regnet anländer.",
+          "rain_soon_window": "Hur långt framåt i minuter Rain Radar ska titta innan binärsensorn för regn snart slås på.",
+          "sample_radius_m": "Område runt den konfigurerade platsen som prognosleverantörer kan använda vid sampling av regndata. MET Norway använder för närvarande punktprognoser, så detta är reserverat för framtida förbättringar.",
+          "forecast_provider": "Leverantör som används för sensorerna för regnets ankomst, regn snart och regnrisk. Radarbilder kommer alltid från Regnradar.",
+          "radar_area": "Regnradar-bildområde som används för kartlagret.",
+          "rain_risk_horizon_hours": "Hur många timmar framåt som ska kontrolleras för regnrisksensorn. Standardvärdet 12 timmar matchar tidigare beteende i MET Rain Risk."
         }
       },
       "reload_notice": {
-        "title": "Finish setup",
-        "description": "Rain Radar will install and register the bundled dashboard card automatically. After the integration is added or updated, reload your browser once if the card is not visible immediately."
+        "title": "Slutför installationen",
+        "description": "Rain Radar installerar och registrerar det medföljande dashboard-kortet automatiskt. När integrationen har lagts till eller uppdaterats, ladda om webbläsaren en gång om kortet inte syns direkt."
       }
     },
     "abort": {
-      "already_configured": "This provider and location are already configured.",
-      "unknown": "The setup flow was interrupted. Start setup again."
+      "already_configured": "Den här prognosleverantören och platsen är redan konfigurerade.",
+      "unknown": "Installationsflödet avbröts. Starta installationen igen."
     },
     "error": {
-      "invalid_latitude": "Latitude must be between -90 and 90.",
-      "invalid_longitude": "Longitude must be between -180 and 180.",
-      "unsupported_provider": "This provider is not supported yet.",
-      "invalid_contact": "Enter an email address or website URL so MET Norway can contact you if needed.",
-      "invalid_rain_threshold": "Rain threshold must be zero or higher.",
-      "invalid_rain_soon_window": "Rain soon window must be between 5 and 120 minutes.",
-      "invalid_sample_radius": "Sampling radius must be between 0 and 10000 meters.",
-      "invalid_rain_risk_horizon": "Rain risk horizon must be between 1 and 24 hours."
+      "invalid_latitude": "Latitud måste vara mellan -90 och 90.",
+      "invalid_longitude": "Longitud måste vara mellan -180 och 180.",
+      "unsupported_forecast_provider": "Den här prognosleverantören stöds inte än.",
+      "unsupported_provider": "Den här leverantören stöds inte än.",
+      "unsupported_radar_area": "Det här radarområdet stöds inte.",
+      "invalid_rain_threshold": "Regntröskeln måste vara noll eller högre.",
+      "invalid_rain_soon_window": "Tidsfönstret för regn snart måste vara mellan 5 och 120 minuter.",
+      "invalid_sample_radius": "Samplingsradien måste vara mellan 0 och 10000 meter.",
+      "invalid_rain_risk_horizon": "Tidshorisonten för regnrisk måste vara mellan 1 och 24 timmar."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Rain Radar options",
-        "description": "Update provider, location, contact, and rain thresholds.",
+        "title": "Rain Radar-alternativ",
+        "description": "Uppdatera prognosleverantör, radarområde, plats och regntrösklar.",
         "data": {
-          "name": "Location name",
-          "latitude": "Latitude",
-          "longitude": "Longitude",
-          "provider": "Provider",
-          "contact": "Contact for MET Norway",
-          "rain_threshold": "Rain threshold",
-          "rain_soon_window": "Rain soon window",
-          "sample_radius_m": "Sampling radius",
-          "rain_risk_horizon_hours": "Rain risk horizon"
+          "name": "Platsnamn",
+          "latitude": "Latitud",
+          "longitude": "Longitud",
+          "forecast_provider": "Prognosleverantör",
+          "radar_area": "Radarområde",
+          "rain_threshold": "Regntröskel",
+          "rain_soon_window": "Tidsfönster för regn snart",
+          "sample_radius_m": "Samplingsradie",
+          "rain_risk_horizon_hours": "Tidshorisont för regnrisk"
+        },
+        "data_description": {
+          "rain_threshold": "Minsta nederbördsintensitet i mm/h som räknas som regn. Detta styr regn just nu, regn snart och beräkningar av när regnet anländer.",
+          "rain_soon_window": "Hur långt framåt i minuter Rain Radar ska titta innan binärsensorn för regn snart slås på.",
+          "sample_radius_m": "Område runt den konfigurerade platsen som prognosleverantörer kan använda vid sampling av regndata. MET Norway använder för närvarande punktprognoser, så detta är reserverat för framtida förbättringar.",
+          "forecast_provider": "Leverantör som används för sensorerna för regnets ankomst, regn snart och regnrisk. Radarbilder kommer alltid från Regnradar.",
+          "radar_area": "Regnradar-bildområde som används för kartlagret.",
+          "rain_risk_horizon_hours": "Hur många timmar framåt som ska kontrolleras för regnrisksensorn. Standardvärdet 12 timmar matchar tidigare beteende i MET Rain Risk."
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "precipitation_now": { "name": "Precipitation now" },
-      "rain_risk_12h": { "name": "Rain risk 12h" },
-      "rain_arrival": { "name": "Rain arrival" },
-      "data_age": { "name": "Data age" },
-      "provider": { "name": "Provider" },
-      "latest_radar_time": { "name": "Latest radar time" }
+      "precipitation_now": { "name": "Nederbörd nu" },
+      "rain_risk_12h": { "name": "Regnrisk 12 h" },
+      "rain_arrival": { "name": "Regnets ankomst" },
+      "data_age": { "name": "Dataålder" },
+      "provider": { "name": "Leverantör" },
+      "latest_radar_time": { "name": "Senaste radartid" }
     },
     "binary_sensor": {
-      "raining_now": { "name": "Raining now" },
-      "rain_soon": { "name": "Rain soon" },
-      "radar_coverage": { "name": "Radar coverage" }
+      "raining_now": { "name": "Regnar nu" },
+      "rain_soon": { "name": "Regn snart" },
+      "radar_coverage": { "name": "Radartäckning" }
     }
   }
 }
-

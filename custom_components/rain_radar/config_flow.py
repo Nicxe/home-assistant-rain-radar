@@ -11,43 +11,41 @@ import voluptuous as vol
 
 from .const import (
     CONF_CONTACT,
+    CONF_FORECAST_PROVIDER,
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_NAME,
-    CONF_PROVIDER,
+    CONF_RADAR_AREA,
+    CONF_RADAR_PROVIDER,
     CONF_RAIN_RISK_HORIZON_HOURS,
     CONF_RAIN_SOON_WINDOW,
     CONF_RAIN_THRESHOLD,
     CONF_SAMPLE_RADIUS_M,
     DEFAULT_CONTACT,
+    DEFAULT_FORECAST_PROVIDER,
     DEFAULT_NAME,
-    DEFAULT_PROVIDER,
+    DEFAULT_RADAR_AREA,
+    DEFAULT_RADAR_PROVIDER,
     DEFAULT_RAIN_RISK_HORIZON_HOURS,
     DEFAULT_RAIN_SOON_WINDOW,
     DEFAULT_RAIN_THRESHOLD,
     DEFAULT_SAMPLE_RADIUS_M,
     DOMAIN,
+    FORECAST_PROVIDER_LABELS,
+    FORECAST_PROVIDER_OPTIONS,
     MAX_RAIN_RISK_HORIZON_HOURS,
     MAX_RAIN_SOON_WINDOW,
     MAX_SAMPLE_RADIUS_M,
     MIN_RAIN_RISK_HORIZON_HOURS,
     MIN_RAIN_SOON_WINDOW,
     MIN_SAMPLE_RADIUS_M,
-    PROVIDER_OPTIONS,
+    REGNRADAR_RADAR_AREA_LABELS,
+    REGNRADAR_RADAR_AREAS,
 )
 
 
 def _round_coord(value: float) -> float:
     return round(float(value), 4)
-
-
-def _is_valid_contact(contact: str) -> bool:
-    contact = contact.strip()
-    if not contact:
-        return False
-    return ("@" in contact and "." in contact) or contact.startswith(
-        ("http://", "https://")
-    )
 
 
 def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
@@ -69,13 +67,15 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
         if not -180 <= longitude <= 180:
             errors[CONF_LONGITUDE] = "invalid_longitude"
 
-    provider = str(user_input.get(CONF_PROVIDER, DEFAULT_PROVIDER))
-    if provider not in PROVIDER_OPTIONS:
-        errors[CONF_PROVIDER] = "unsupported_provider"
+    forecast_provider = str(
+        user_input.get(CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER)
+    )
+    if forecast_provider not in FORECAST_PROVIDER_OPTIONS:
+        errors[CONF_FORECAST_PROVIDER] = "unsupported_forecast_provider"
 
-    contact = str(user_input.get(CONF_CONTACT, "")).strip()
-    if not _is_valid_contact(contact):
-        errors[CONF_CONTACT] = "invalid_contact"
+    radar_area = str(user_input.get(CONF_RADAR_AREA, DEFAULT_RADAR_AREA))
+    if radar_area not in REGNRADAR_RADAR_AREAS:
+        errors[CONF_RADAR_AREA] = "unsupported_radar_area"
 
     try:
         rain_threshold = float(user_input[CONF_RAIN_THRESHOLD])
@@ -117,8 +117,12 @@ def _normalized_data(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_NAME: str(user_input.get(CONF_NAME, DEFAULT_NAME)).strip() or DEFAULT_NAME,
         CONF_LATITUDE: float(user_input[CONF_LATITUDE]),
         CONF_LONGITUDE: float(user_input[CONF_LONGITUDE]),
-        CONF_PROVIDER: str(user_input.get(CONF_PROVIDER, DEFAULT_PROVIDER)),
-        CONF_CONTACT: str(user_input[CONF_CONTACT]).strip(),
+        CONF_FORECAST_PROVIDER: str(
+            user_input.get(CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER)
+        ),
+        CONF_RADAR_PROVIDER: DEFAULT_RADAR_PROVIDER,
+        CONF_RADAR_AREA: str(user_input.get(CONF_RADAR_AREA, DEFAULT_RADAR_AREA)),
+        CONF_CONTACT: DEFAULT_CONTACT,
         CONF_RAIN_THRESHOLD: float(user_input[CONF_RAIN_THRESHOLD]),
         CONF_RAIN_SOON_WINDOW: int(user_input[CONF_RAIN_SOON_WINDOW]),
         CONF_SAMPLE_RADIUS_M: int(user_input[CONF_SAMPLE_RADIUS_M]),
@@ -136,15 +140,34 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(CONF_LONGITUDE, default=defaults[CONF_LONGITUDE]): vol.Coerce(
                 float
             ),
-            vol.Required(CONF_PROVIDER, default=defaults[CONF_PROVIDER]): selector(
+            vol.Required(
+                CONF_FORECAST_PROVIDER,
+                default=defaults[CONF_FORECAST_PROVIDER],
+            ): selector(
                 {
                     "select": {
-                        "options": [{"value": DEFAULT_PROVIDER, "label": "MET Norway"}],
+                        "options": [
+                            {"value": value, "label": FORECAST_PROVIDER_LABELS[value]}
+                            for value in FORECAST_PROVIDER_OPTIONS
+                        ],
                         "mode": "dropdown",
                     }
                 }
             ),
-            vol.Required(CONF_CONTACT, default=defaults[CONF_CONTACT]): str,
+            vol.Required(CONF_RADAR_AREA, default=defaults[CONF_RADAR_AREA]): selector(
+                {
+                    "select": {
+                        "options": [
+                            {
+                                "value": value,
+                                "label": REGNRADAR_RADAR_AREA_LABELS[value],
+                            }
+                            for value in REGNRADAR_RADAR_AREAS
+                        ],
+                        "mode": "dropdown",
+                    }
+                }
+            ),
             vol.Required(
                 CONF_RAIN_THRESHOLD,
                 default=defaults[CONF_RAIN_THRESHOLD],
@@ -168,7 +191,7 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
 class RainRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Rain Radar."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         self._pending_title: str | None = None
@@ -191,7 +214,7 @@ class RainRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not errors:
                 data = _normalized_data(user_input)
                 unique_id = (
-                    f"{data[CONF_PROVIDER]}:"
+                    f"{data[CONF_FORECAST_PROVIDER]}:"
                     f"{_round_coord(data[CONF_LATITUDE])},"
                     f"{_round_coord(data[CONF_LONGITUDE])}"
                 )
@@ -208,8 +231,8 @@ class RainRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_NAME: DEFAULT_NAME,
             CONF_LATITUDE: self.hass.config.latitude,
             CONF_LONGITUDE: self.hass.config.longitude,
-            CONF_PROVIDER: DEFAULT_PROVIDER,
-            CONF_CONTACT: DEFAULT_CONTACT,
+            CONF_FORECAST_PROVIDER: DEFAULT_FORECAST_PROVIDER,
+            CONF_RADAR_AREA: DEFAULT_RADAR_AREA,
             CONF_RAIN_THRESHOLD: DEFAULT_RAIN_THRESHOLD,
             CONF_RAIN_SOON_WINDOW: DEFAULT_RAIN_SOON_WINDOW,
             CONF_SAMPLE_RADIUS_M: DEFAULT_SAMPLE_RADIUS_M,
@@ -260,8 +283,10 @@ class RainRadarOptionsFlow(config_entries.OptionsFlow):
             CONF_NAME: self._get(CONF_NAME, DEFAULT_NAME),
             CONF_LATITUDE: self._get(CONF_LATITUDE, self.hass.config.latitude),
             CONF_LONGITUDE: self._get(CONF_LONGITUDE, self.hass.config.longitude),
-            CONF_PROVIDER: self._get(CONF_PROVIDER, DEFAULT_PROVIDER),
-            CONF_CONTACT: self._get(CONF_CONTACT, DEFAULT_CONTACT),
+            CONF_FORECAST_PROVIDER: self._get(
+                CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER
+            ),
+            CONF_RADAR_AREA: self._get(CONF_RADAR_AREA, DEFAULT_RADAR_AREA),
             CONF_RAIN_THRESHOLD: self._get(
                 CONF_RAIN_THRESHOLD,
                 DEFAULT_RAIN_THRESHOLD,

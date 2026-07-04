@@ -18,21 +18,36 @@ PROJECT_URL = "https://github.com/Nicxe/home-assistant-rain-radar"
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 CONF_CONTACT = "contact"
+CONF_FORECAST_PROVIDER = "forecast_provider"
 CONF_LATITUDE = "latitude"
 CONF_LONGITUDE = "longitude"
 CONF_NAME = "name"
 CONF_PROVIDER = "provider"
+CONF_RADAR_AREA = "radar_area"
+CONF_RADAR_PROVIDER = "radar_provider"
 CONF_RAIN_RISK_HORIZON_HOURS = "rain_risk_horizon_hours"
 CONF_RAIN_SOON_WINDOW = "rain_soon_window"
 CONF_RAIN_THRESHOLD = "rain_threshold"
 CONF_SAMPLE_RADIUS_M = "sample_radius_m"
 
 PROVIDER_MET_NO = "met_no"
-PROVIDER_OPTIONS = [PROVIDER_MET_NO]
+PROVIDER_REGNRADAR = "regnradar"
+PROVIDER_OPTIONS = [PROVIDER_MET_NO, PROVIDER_REGNRADAR]
+PROVIDER_LABELS = {
+    PROVIDER_MET_NO: "MET Norway",
+    PROVIDER_REGNRADAR: "Regnradar",
+}
+FORECAST_PROVIDER_OPTIONS = [PROVIDER_MET_NO]
+FORECAST_PROVIDER_LABELS = {
+    PROVIDER_MET_NO: "MET Norway",
+}
 
 DEFAULT_NAME = "Home"
-DEFAULT_CONTACT = ""
+DEFAULT_CONTACT = "niklas.vilnersson@gmail.com"
 DEFAULT_PROVIDER = PROVIDER_MET_NO
+DEFAULT_FORECAST_PROVIDER = PROVIDER_MET_NO
+DEFAULT_RADAR_AREA = "nordic"
+DEFAULT_RADAR_PROVIDER = PROVIDER_REGNRADAR
 DEFAULT_RAIN_THRESHOLD = 0.1
 DEFAULT_RAIN_SOON_WINDOW = 60
 DEFAULT_SAMPLE_RADIUS_M = 1000
@@ -52,13 +67,27 @@ MET_NO_LOCATIONFORECAST_COMPLETE_URL = (
 )
 MET_NO_NOWCAST_COMPLETE_URL = "https://api.met.no/weatherapi/nowcast/2.0/complete"
 MET_NO_RADAR_AVAILABLE_URL = "https://api.met.no/weatherapi/radar/2.0/available.json"
+MET_NO_RADAR_LOCATIONS_URL = "https://api.met.no/weatherapi/radar/2.0/locations.json"
+MET_NO_RADAR_AREA = "nordic"
+MET_NO_RADAR_CONTENT = "image"
+MET_NO_RADAR_PRODUCT = "5level_reflectivity"
 MET_NO_RADAR_ANIMATION_URL = (
     "https://api.met.no/weatherapi/radar/2.0/"
-    "?type=reflectivity&area=nordic&content=animation"
+    f"?type={MET_NO_RADAR_PRODUCT}&area={MET_NO_RADAR_AREA}&content=animation"
 )
+
+REGNRADAR_ATTRIBUTION = "Radar imagery from Regnradar/Vackertväder"
+REGNRADAR_RADAR_URL = "https://api.regnradar.se/radar"
+REGNRADAR_RADAR_AREAS = ("nordic", "sweden", "denmark")
+REGNRADAR_RADAR_AREA_LABELS = {
+    "nordic": "Nordic",
+    "sweden": "Sweden",
+    "denmark": "Denmark",
+}
 
 CARD_FILENAME = "rain-radar-card.js"
 CARD_WWW_DIR = "www"
+CARD_LOCAL_ASSET_DIR = DOMAIN
 CARD_STATIC_BASE_PATH = f"/{DOMAIN}-static"
 CARD_CANONICAL_BASE_URL = f"{CARD_STATIC_BASE_PATH}/{CARD_FILENAME}"
 CARD_LEGACY_BASE_URL = f"/local/{CARD_FILENAME}"
@@ -73,6 +102,8 @@ ATTR_IS_STALE = "is_stale"
 ATTR_LAST_UPDATED = "last_updated"
 ATTR_PROVIDER = "provider"
 ATTR_PROVIDER_ID = "provider_id"
+ATTR_FORECAST_PROVIDER_ID = "forecast_provider_id"
+ATTR_RADAR_PROVIDER_ID = "radar_provider_id"
 ATTR_STATUS = "status"
 
 

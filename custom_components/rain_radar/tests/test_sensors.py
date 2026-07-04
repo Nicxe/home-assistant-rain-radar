@@ -60,12 +60,14 @@ async def test_entities_are_created_with_expected_states(
         return RadarFrameSet(
             frames=[
                 RadarFrame(
+                    frame_id="regnradar-nordic-obs-test",
                     time=now,
-                    url="https://api.met.no/weatherapi/radar/2.0/?content=image",
+                    source_url="https://api.regnradar.se/radar/file/test.png",
+                    image_cache_key="regnradar_radar_image_test",
                 )
             ],
             latest_time=now,
-            attribution="Data from MET Norway",
+            attribution="Radar imagery from Regnradar/Vackertväder",
             coverage_status=CoverageStatus.OK,
         )
 
@@ -78,7 +80,7 @@ async def test_entities_are_created_with_expected_states(
         _rain_risk,
     )
     monkeypatch.setattr(
-        "custom_components.rain_radar.providers.met_no.MetNoProvider.async_get_radar_frames",
+        "custom_components.rain_radar.providers.regnradar.RegnradarProvider.async_get_radar_frames",
         _frames,
     )
 
@@ -95,3 +97,11 @@ async def test_entities_are_created_with_expected_states(
     assert "hourly" in attrs
     assert len(attrs["hourly"]) == 1
     assert attrs["rain_radar_entry_id"] == rain_radar_config_entry.entry_id
+
+    precipitation_attrs = hass.states.get("sensor.home_precipitation_now").attributes
+    assert precipitation_attrs["rain_threshold"] == 0.1
+    assert precipitation_attrs["rain_soon_window_minutes"] == 60
+
+    provider_attrs = hass.states.get("sensor.home_provider").attributes
+    assert provider_attrs["radar_provider_id"] == "regnradar"
+    assert provider_attrs["forecast_provider_id"] == "met_no"
