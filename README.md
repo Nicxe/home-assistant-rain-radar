@@ -8,6 +8,9 @@
 
 Rain Radar is a custom Home Assistant integration for Nordic rain monitoring. It combines Regnradar radar imagery with MET Norway point forecasts so dashboards and automations can answer practical questions such as whether it is raining now, whether rain is expected soon, and how high the rain risk is in the next hours.
 
+<img width="530" height="648" alt="CleanShot 2026-07-04 at 22 34 34" src="https://github.com/user-attachments/assets/5b2c69a7-7c76-49da-8550-0c17a5ca82ce" />
+
+
 The integration includes Home Assistant entities, a config flow, options flow, diagnostics, localized Home Assistant setup text, authenticated radar image endpoints, and a bundled Lovelace dashboard card.
 
 ## Features
