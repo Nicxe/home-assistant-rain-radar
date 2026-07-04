@@ -1,0 +1,90 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Rain Radar",
+        "description": "Määritä Regnradar-tutkakuvat ja automaatioihin sopivat sade-ennustesensorit.",
+        "data": {
+          "name": "Sijainnin nimi",
+          "latitude": "Leveysaste",
+          "longitude": "Pituusaste",
+          "forecast_provider": "Ennustepalvelu",
+          "radar_area": "Tutka-alue",
+          "rain_threshold": "Saderaja",
+          "rain_soon_window": "Lähisateen aikaikkuna",
+          "sample_radius_m": "Näytesäde",
+          "rain_risk_horizon_hours": "Saderiskin aikahorisontti"
+        },
+        "data_description": {
+          "rain_threshold": "Pienin sademäärän intensiteetti mm/h, joka lasketaan sateeksi. Tämä ohjaa nyt satamisen, lähisateen ja sateen saapumisajan laskentaa.",
+          "rain_soon_window": "Kuinka monta minuuttia eteenpäin Rain Radar tarkistaa ennen kuin lähisateen binäärianturi kytkeytyy päälle.",
+          "sample_radius_m": "Alue määritetyn sijainnin ympärillä, jota ennustepalvelut voivat käyttää sadetietojen näytteistämiseen. MET Norway käyttää tällä hetkellä piste-ennusteita, joten tämä on varattu tuleville parannuksille.",
+          "forecast_provider": "Palvelu, jota käytetään sateen saapumisen, lähisateen ja saderiskin sensoreille. Tutkakuvat tulevat aina Regnradarista.",
+          "radar_area": "Regnradar-kuva-alue, jota käytetään karttatasossa.",
+          "rain_risk_horizon_hours": "Kuinka monta tuntia eteenpäin saderiskisensori tarkistaa. Oletus 12 tuntia vastaa aiempaa MET Rain Risk -toimintaa."
+        }
+      },
+      "reload_notice": {
+        "title": "Viimeistele määritys",
+        "description": "Rain Radar asentaa ja rekisteröi mukana tulevan koontinäkymäkortin automaattisesti. Kun integraatio on lisätty tai päivitetty, lataa selain kerran uudelleen, jos kortti ei näy heti."
+      }
+    },
+    "abort": {
+      "already_configured": "Tämä ennustepalvelu ja sijainti on jo määritetty.",
+      "unknown": "Määritys keskeytyi. Aloita määritys uudelleen."
+    },
+    "error": {
+      "invalid_latitude": "Leveysasteen on oltava välillä -90 ja 90.",
+      "invalid_longitude": "Pituusasteen on oltava välillä -180 ja 180.",
+      "unsupported_forecast_provider": "Tätä ennustepalvelua ei vielä tueta.",
+      "unsupported_provider": "Tätä palvelua ei vielä tueta.",
+      "unsupported_radar_area": "Tätä tutka-aluetta ei tueta.",
+      "invalid_rain_threshold": "Saderajan on oltava nolla tai suurempi.",
+      "invalid_rain_soon_window": "Lähisateen aikaikkunan on oltava 5-120 minuuttia.",
+      "invalid_sample_radius": "Näytesäteen on oltava 0-10000 metriä.",
+      "invalid_rain_risk_horizon": "Saderiskin aikahorisontin on oltava 1-24 tuntia."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Rain Radar -asetukset",
+        "description": "Päivitä ennustepalvelu, tutka-alue, sijainti ja saderajat.",
+        "data": {
+          "name": "Sijainnin nimi",
+          "latitude": "Leveysaste",
+          "longitude": "Pituusaste",
+          "forecast_provider": "Ennustepalvelu",
+          "radar_area": "Tutka-alue",
+          "rain_threshold": "Saderaja",
+          "rain_soon_window": "Lähisateen aikaikkuna",
+          "sample_radius_m": "Näytesäde",
+          "rain_risk_horizon_hours": "Saderiskin aikahorisontti"
+        },
+        "data_description": {
+          "rain_threshold": "Pienin sademäärän intensiteetti mm/h, joka lasketaan sateeksi. Tämä ohjaa nyt satamisen, lähisateen ja sateen saapumisajan laskentaa.",
+          "rain_soon_window": "Kuinka monta minuuttia eteenpäin Rain Radar tarkistaa ennen kuin lähisateen binäärianturi kytkeytyy päälle.",
+          "sample_radius_m": "Alue määritetyn sijainnin ympärillä, jota ennustepalvelut voivat käyttää sadetietojen näytteistämiseen. MET Norway käyttää tällä hetkellä piste-ennusteita, joten tämä on varattu tuleville parannuksille.",
+          "forecast_provider": "Palvelu, jota käytetään sateen saapumisen, lähisateen ja saderiskin sensoreille. Tutkakuvat tulevat aina Regnradarista.",
+          "radar_area": "Regnradar-kuva-alue, jota käytetään karttatasossa.",
+          "rain_risk_horizon_hours": "Kuinka monta tuntia eteenpäin saderiskisensori tarkistaa. Oletus 12 tuntia vastaa aiempaa MET Rain Risk -toimintaa."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "precipitation_now": { "name": "Sade nyt" },
+      "rain_risk_12h": { "name": "Saderiski 12 h" },
+      "rain_arrival": { "name": "Sateen saapuminen" },
+      "data_age": { "name": "Tietojen ikä" },
+      "provider": { "name": "Palvelu" },
+      "latest_radar_time": { "name": "Viimeisin tutka-aika" }
+    },
+    "binary_sensor": {
+      "raining_now": { "name": "Sataa nyt" },
+      "rain_soon": { "name": "Sadetta pian" },
+      "radar_coverage": { "name": "Tutkapeitto" }
+    }
+  }
+}

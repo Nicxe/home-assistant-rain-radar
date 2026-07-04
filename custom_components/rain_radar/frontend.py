@@ -22,6 +22,7 @@ from .const import (
     CARD_CANONICAL_BASE_URL,
     CARD_FILENAME,
     CARD_LEGACY_BASE_URL,
+    CARD_LOCAL_ASSET_DIR,
     CARD_WWW_DIR,
     FRONTEND_DATA_COMPONENT_LISTENER,
     FRONTEND_DATA_KEY,
@@ -40,6 +41,11 @@ def _local_www_card_path(hass: HomeAssistant) -> Path:
     return Path(hass.config.path("www")) / CARD_FILENAME
 
 
+def _local_www_asset_path(hass: HomeAssistant, relative_path: Path) -> Path:
+    """Return target path for /local integration assets."""
+    return Path(hass.config.path("www")) / CARD_LOCAL_ASSET_DIR / relative_path
+
+
 def _read_manifest_version() -> str:
     """Read integration version from manifest.json."""
     manifest_path = Path(__file__).resolve().parent / "manifest.json"
@@ -51,11 +57,17 @@ def _read_manifest_version() -> str:
 
 
 def _card_mtime() -> int:
-    """Read bundled card mtime."""
-    try:
-        return int(_card_file_path().stat().st_mtime)
-    except OSError:
-        return 0
+    """Read latest bundled frontend asset mtime."""
+    www_path = Path(__file__).resolve().parent / CARD_WWW_DIR
+    latest = 0
+    for path in www_path.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            latest = max(latest, int(path.stat().st_mtime))
+        except OSError:
+            continue
+    return latest
 
 
 def _read_file_bytes(path: Path) -> bytes:
@@ -71,21 +83,63 @@ def _write_file_bytes(path: Path, content: bytes) -> None:
     tmp_path.replace(path)
 
 
-async def _async_sync_card_to_local_www(hass: HomeAssistant) -> None:
-    """Sync bundled card file into /config/www."""
-    source = _card_file_path()
-    target = _local_www_card_path(hass)
+def _copy_file_if_changed(source: Path, target: Path) -> bool:
+    """Copy source to target when content differs."""
+    source_bytes = _read_file_bytes(source)
+    try:
+        target_bytes = _read_file_bytes(target)
+    except OSError:
+        target_bytes = None
 
-    if not source.exists():
+    if target_bytes == source_bytes:
+        return False
+
+    _write_file_bytes(target, source_bytes)
+    return True
+
+
+def _sync_vendor_assets_to_local_www(www_path: Path) -> int:
+    """Sync bundled frontend vendor assets into /config/www."""
+    source_root = Path(__file__).resolve().parent / CARD_WWW_DIR
+    if not source_root.is_dir():
+        return 0
+
+    copied = 0
+    for source in source_root.rglob("*"):
+        if not source.is_file() or source.name == CARD_FILENAME:
+            continue
+        relative_path = source.relative_to(source_root)
+        target = www_path / CARD_LOCAL_ASSET_DIR / relative_path
+        if _copy_file_if_changed(source, target):
+            copied += 1
+    return copied
+
+
+def _sync_frontend_assets_to_local_www(www_path: str) -> None:
+    """Sync bundled frontend assets into /config/www."""
+    source = _card_file_path()
+    target = Path(www_path) / CARD_FILENAME
+
+    if not source.is_file():
         _LOGGER.warning("Missing bundled card file: %s", source)
         return
 
-    source_bytes = await hass.async_add_executor_job(_read_file_bytes, source)
-    if target.exists():
-        target_bytes = await hass.async_add_executor_job(_read_file_bytes, target)
-        if target_bytes == source_bytes:
-            return
-    await hass.async_add_executor_job(_write_file_bytes, target, source_bytes)
+    _copy_file_if_changed(source, target)
+    _sync_vendor_assets_to_local_www(Path(www_path))
+
+
+async def _async_sync_card_to_local_www(hass: HomeAssistant) -> None:
+    """Sync bundled card file into /config/www."""
+    await hass.async_add_executor_job(
+        _sync_frontend_assets_to_local_www, hass.config.path("www")
+    )
+
+
+async def _async_sync_vendor_assets_to_local_www(hass: HomeAssistant) -> None:
+    """Sync bundled frontend vendor assets into /config/www."""
+    await hass.async_add_executor_job(
+        _sync_vendor_assets_to_local_www, Path(hass.config.path("www"))
+    )
 
 
 async def _cache_key_for_dev(hass: HomeAssistant) -> str:
