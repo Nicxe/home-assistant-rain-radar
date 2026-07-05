@@ -227,3 +227,4 @@ async def test_regnradar_delegates_point_forecasts_to_fallback_provider() -> Non
 
     assert precipitation.coverage_status == CoverageStatus.OK
     assert rain_risk.max_probability == 42
+    assert provider.coverage_status == CoverageStatus.UNKNOWN

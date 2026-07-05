@@ -27,6 +27,7 @@ from custom_components.rain_radar.const import (
     DEFAULT_RADAR_PROVIDER,
     DOMAIN,
     PROVIDER_MET_NO,
+    PROVIDER_SMHI,
 )
 
 VALID_INPUT = {
@@ -107,6 +108,29 @@ async def test_user_step_accepts_radar_area_with_forecast_provider(
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_FORECAST_PROVIDER] == PROVIDER_MET_NO
+    assert result["data"][CONF_RADAR_PROVIDER] == DEFAULT_RADAR_PROVIDER
+    assert result["data"][CONF_RADAR_AREA] == "sweden"
+
+
+async def test_user_step_accepts_smhi_forecast_provider(
+    hass: HomeAssistant,
+) -> None:
+    """Test SMHI can be selected for forecast sensors while radar stays Regnradar."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+    user_input = dict(VALID_INPUT)
+    user_input[CONF_FORECAST_PROVIDER] = PROVIDER_SMHI
+    user_input[CONF_RADAR_AREA] = "sweden"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input,
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_FORECAST_PROVIDER] == PROVIDER_SMHI
     assert result["data"][CONF_RADAR_PROVIDER] == DEFAULT_RADAR_PROVIDER
     assert result["data"][CONF_RADAR_AREA] == "sweden"
 

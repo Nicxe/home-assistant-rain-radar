@@ -119,7 +119,7 @@ class RainRadarCoordinator(DataUpdateCoordinator[RainRadarData]):
             _LOGGER.debug("Radar frame metadata update failed: %s", radar_result)
             radar_frames = RadarFrameSet(
                 attribution=self.provider.attribution,
-                coverage_status=precipitation.coverage_status,
+                coverage_status=self.provider.coverage_status,
             )
         else:
             radar_frames = radar_result

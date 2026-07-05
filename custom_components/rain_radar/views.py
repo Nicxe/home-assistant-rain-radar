@@ -31,12 +31,19 @@ class RainRadarFramesView(HomeAssistantView):
             return self.json({"frames": [], "attribution": None})
 
         frame_set = data.radar_frames
+        frame_types = sorted({frame.frame_type for frame in frame_set.frames})
         return self.json(
             {
                 "entry_id": entry_id,
                 "provider": data.provider_status.provider_name,
                 "radar_provider": "regnradar",
+                "radar_area": data.options.radar_area,
                 "forecast_provider": data.options.forecast_provider,
+                "frame_types": frame_types,
+                "has_forecast_frames": any(
+                    frame_type.lower() in {"fcst", "forecast"}
+                    for frame_type in frame_types
+                ),
                 "location": {
                     "latitude": data.location.latitude,
                     "longitude": data.location.longitude,

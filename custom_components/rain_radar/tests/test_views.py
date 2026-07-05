@@ -58,7 +58,7 @@ def _runtime_data():
             ),
         ),
         location=Location(latitude=59.3293, longitude=18.0686),
-        options=SimpleNamespace(forecast_provider="met_no"),
+        options=SimpleNamespace(forecast_provider="met_no", radar_area="sweden"),
         radar_frames=RadarFrameSet(
             frames=[frame],
             bounds=RadarBounds(
@@ -103,7 +103,10 @@ async def test_frames_view_returns_signed_image_url_without_source_url(
     assert "bounds" in payload
     assert "overlay_mode" in payload
     assert '"radar_provider":"regnradar"' in payload
+    assert '"radar_area":"sweden"' in payload
     assert '"forecast_provider":"met_no"' in payload
+    assert '"frame_types":["image"]' in payload
+    assert '"has_forecast_frames":false' in payload
     assert "regnradar" in payload
 
 

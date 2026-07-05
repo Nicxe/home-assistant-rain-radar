@@ -1,19 +1,17 @@
-# SMHI Future Provider
+# SMHI Provider
 
-SMHI is planned as a future provider for improved Sweden-specific radar support. It is not implemented in the first release.
+SMHI is implemented as a forecast provider for Swedish point forecasts. Rain Radar uses SMHI Open Data SNOW1G for precipitation amount, precipitation probability, and weather symbol data.
 
-Expected value:
+Current behavior:
 
-- Better Sweden-focused radar coverage.
-- Potentially more precise local precipitation sampling.
-- A provider mode optimized for Swedish Home Assistant installations.
+- Users can choose SMHI as the forecast provider in the config flow or options flow.
+- SMHI forecast data drives rain now, rain soon, rain arrival, and rain risk entities.
+- The Sweden radar source uses SMHI radar frames through Regnradar. Rain Radar does not fetch SMHI radar raster files directly.
 
-Known challenges:
+Current limits:
 
-- Projection handling.
-- Raster or scientific data format parsing.
-- Dependency constraints inside Home Assistant custom integrations.
-- Efficient rendering or frame generation for dashboards.
+- SMHI is forecast-only inside the provider abstraction.
+- Radar image fetching still goes through Regnradar.
+- Coordinates outside SMHI forecast coverage are reported as outside coverage instead of failing the whole integration.
 
-The first implementation must remain MET Norway-only. SMHI work should start after the provider model and card data flow have been validated with real users.
-
+Future direct SMHI radar work would still need a separate design for projection handling, raster/scientific data parsing, Home Assistant dependency constraints, and efficient dashboard rendering.

@@ -80,7 +80,7 @@ class RegnradarProvider:
         """Initialize provider."""
         self.client = client
         self.forecast_provider = forecast_provider
-        self._coverage_status = CoverageStatus.UNKNOWN
+        self._radar_coverage_status = CoverageStatus.UNKNOWN
 
     @property
     def provider_id(self) -> str:
@@ -103,7 +103,7 @@ class RegnradarProvider:
     @property
     def coverage_status(self) -> CoverageStatus:
         """Return latest known coverage status."""
-        return self._coverage_status
+        return self._radar_coverage_status
 
     async def async_get_precipitation_forecast(
         self,
@@ -111,11 +111,9 @@ class RegnradarProvider:
         options: RainRadarOptions,
     ) -> PrecipitationForecast:
         """Fetch normalized point precipitation forecast."""
-        forecast = await self.forecast_provider.async_get_precipitation_forecast(
+        return await self.forecast_provider.async_get_precipitation_forecast(
             location, options
         )
-        self._coverage_status = forecast.coverage_status
-        return forecast
 
     async def async_get_rain_risk(
         self,
@@ -140,13 +138,15 @@ class RegnradarProvider:
             )
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Unable to fetch Regnradar frame metadata: %s", err)
-            return _empty_frame_set(area, self._coverage_status)
+            return _empty_frame_set(area, self._radar_coverage_status)
 
         if not isinstance(payload, dict):
+            self._radar_coverage_status = CoverageStatus.UNKNOWN
             return _empty_frame_set(area, CoverageStatus.UNKNOWN)
 
         area_payload = payload.get(area)
         if not isinstance(area_payload, dict):
+            self._radar_coverage_status = CoverageStatus.OUTSIDE_COVERAGE
             return _empty_frame_set(area, CoverageStatus.OUTSIDE_COVERAGE)
 
         frames = _parse_radar_frames(area, area_payload)
@@ -157,7 +157,7 @@ class RegnradarProvider:
         )
         if isinstance(no_coverage, list) and no_coverage:
             coverage_status = CoverageStatus.OK
-        self._coverage_status = coverage_status
+        self._radar_coverage_status = coverage_status
 
         return RadarFrameSet(
             frames=frames,

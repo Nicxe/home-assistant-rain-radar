@@ -6,7 +6,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/Nicxe/home-assistant-rain-radar)](#) [![Version](https://img.shields.io/github/v/release/Nicxe/home-assistant-rain-radar)](#) ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/nicxe/home-assistant-rain-radar/latest/total)
 
 
-Rain Radar is a custom Home Assistant integration for Nordic rain monitoring. It combines Regnradar radar imagery with MET Norway point forecasts so dashboards and automations can answer practical questions such as whether it is raining now, whether rain is expected soon, and how high the rain risk is in the next hours.
+Rain Radar is a custom Home Assistant integration for Nordic rain monitoring. It combines Regnradar radar imagery with selectable MET Norway or SMHI point forecasts so dashboards and automations can answer practical questions such as whether it is raining now, whether rain is expected soon, and how high the rain risk is in the next hours.
 
 The integration includes Home Assistant entities, a config flow, options flow, diagnostics, localized Home Assistant setup text, authenticated radar image endpoints, and a bundled Lovelace dashboard card.
 
@@ -23,9 +23,9 @@ The integration includes Home Assistant entities, a config flow, options flow, d
 
 ## Data Sources
 
-Radar imagery comes from [Regnradar/Vackertväder](https://regnradar.se/). Forecast-based entities currently use open data from [MET Norway](https://api.met.no/).
+Radar imagery comes from [Regnradar/Vackertväder](https://regnradar.se/). Forecast-based entities can use open data from [MET Norway](https://api.met.no/) or [SMHI](https://opendata.smhi.se/).
 
-Regnradar is used for the radar map overlay. MET Norway is currently the only selectable forecast provider for rain arrival, rain soon, precipitation, and rain risk calculations. SMHI and DMI forecast providers are planned for future releases but are not active yet.
+Regnradar is used for the radar map overlay. The Nordic radar source uses MET frames through Regnradar and can include forecast radar frames when available. The Sweden radar source uses SMHI radar frames through Regnradar. DMI remains future work for Denmark-specific forecast data.
 
 ## Installation
 
@@ -58,11 +58,11 @@ Set up Rain Radar through Settings > Devices & services > Add Integration > Rain
 | Location name | `Home` | Used as the base name for the created entities. |
 | Latitude | Home Assistant latitude | Must be between `-90` and `90`. |
 | Longitude | Home Assistant longitude | Must be between `-180` and `180`. |
-| Forecast provider | MET Norway | Used for rain arrival, rain soon, precipitation, and rain risk. |
-| Radar area | Nordic | Regnradar area used for radar frames and map coverage. |
+| Forecast provider | MET Norway | Used for rain arrival, rain soon, precipitation, and rain risk. Choose SMHI for SMHI SNOW1G point forecast data. |
+| Radar source | Nordic | Regnradar source used for radar frames and map coverage. Choose Sweden for SMHI radar frames through Regnradar. |
 | Rain threshold | `0.1` mm/h | Minimum intensity that counts as rain. |
 | Rain soon window | `60` minutes | Look-ahead window for the rain soon binary sensor. |
-| Sampling radius | `1000` meters | Reserved for provider strategies. MET Norway currently uses point forecasts. |
+| Sampling radius | `1000` meters | Reserved for provider strategies. MET Norway and SMHI currently use point/grid-point forecasts. |
 | Rain risk horizon | `12` hours | Forecast horizon inspected by the rain risk sensor. |
 
 The same values can be changed later from the integration options. Setup and options text is available in English, Swedish, Finnish, Norwegian Bokmål, and Danish.
@@ -80,7 +80,7 @@ Rain Radar creates these entities for each configured location. Entity IDs use t
 | `sensor.<name>_rain_risk_12h` | Sensor | Highest precipitation probability in percent | Hourly probability, precipitation amount, symbol code, update status |
 | `sensor.<name>_rain_arrival` | Sensor | Minutes until expected rain, when known | Attribution and entry ID |
 | `sensor.<name>_data_age` | Sensor | Age of the newest available data in minutes | Attribution and entry ID |
-| `sensor.<name>_provider` | Sensor | Active provider name | Provider IDs, status, coverage status, attribution |
+| `sensor.<name>_provider` | Sensor | Active provider name | Provider IDs, radar source, status, forecast coverage, radar coverage, attribution |
 | `sensor.<name>_latest_radar_time` | Sensor | Timestamp of the latest radar frame | Attribution and entry ID |
 
 Raw provider payloads are not stored as entity attributes. Forecast details are bounded to the values needed by dashboards and automations.

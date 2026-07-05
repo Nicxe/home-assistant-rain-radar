@@ -27,6 +27,7 @@ from .const import (
     ATTR_IS_STALE,
     ATTR_LAST_UPDATED,
     ATTR_PROVIDER_ID,
+    ATTR_RADAR_AREA,
     ATTR_RADAR_PROVIDER_ID,
     ATTR_STATUS,
     ATTRIBUTION,
@@ -96,9 +97,12 @@ def _provider_attrs(data: RainRadarData) -> dict[str, Any]:
     return {
         ATTR_PROVIDER_ID: data.provider_status.provider_id,
         ATTR_RADAR_PROVIDER_ID: DEFAULT_RADAR_PROVIDER,
+        ATTR_RADAR_AREA: data.options.radar_area,
         ATTR_FORECAST_PROVIDER_ID: data.options.forecast_provider,
         ATTR_STATUS: data.provider_status.health.value,
         "coverage_status": data.provider_status.coverage_status.value,
+        "radar_coverage_status": data.radar_frames.coverage_status.value,
+        "radar_frame_count": len(data.radar_frames.frames),
         ATTRIBUTION: data.provider_status.attribution,
     }
 
