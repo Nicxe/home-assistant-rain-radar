@@ -224,10 +224,8 @@ def test_bundled_card_exposes_layer_and_forecast_options() -> None:
     assert "tile_attribution: DEFAULT_TILE_ATTRIBUTION" in card_text
     assert "rainSoonStatus" in card_text
     assert "locationNameFromEntity" in card_text
-    assert (
-        'this.shadowRoot.querySelector(".name").textContent = status.label' in card_text
-    )
-    assert 'badge.querySelector("span").textContent = status.label' in card_text
+    assert "const statusLabel = this._t(status.labelKey)" in card_text
+    assert 'this._setMetaValue("status", statusLabel)' in card_text
     assert 'friendly_name || "Rain Radar"' not in card_text
     assert "coverage_opacity: DEFAULT_COVERAGE_OPACITY" in card_text
     assert "animation_interval_ms: DEFAULT_ANIMATION_INTERVAL_MS" in card_text
@@ -242,15 +240,18 @@ def test_bundled_card_exposes_layer_and_forecast_options() -> None:
     assert "? minuteValue(arrivalState)" in card_text
     assert "context.arrivalMinutes" in card_text
     assert "const minutes = Number(value)" not in card_text
-    assert 'name="arrival_format"' in card_text
-    assert 'value="duration_time"' in card_text
+    assert 'name: "arrival_format"' in card_text
+    assert '{ value: "duration_time", label: "Hours, minutes and time" }' in card_text
     assert "buildTimelineFrames" in card_text
     assert "radarFrameType" in card_text
     assert "isObservedRadarFrame" in card_text
     assert '["fcst", "forecast"].includes(radarFrameType(frame))' in card_text
     assert "latestRadarText" in card_text
-    assert "latest-radar-metric" in card_text
-    assert "latestRadarMetric.hidden = !latestRadar" in card_text
+    assert (
+        'this._setMetaValue("latest_radar", latestRadar || this._t("unknown"))'
+        in card_text
+    )
+    assert "this._setMetaVisibility(context, { latestRadar })" in card_text
     assert "stateText(radarTime, null)" in card_text
     assert "availableForecastMinutes" in card_text
     assert "if (!Number.isFinite(sample.rate)) break" in card_text
@@ -266,7 +267,7 @@ def test_bundled_card_exposes_layer_and_forecast_options() -> None:
     assert "Forecast +60 min" not in card_text
     assert "latestObserved.imageUrl" not in card_text
     assert "latestObserved.id" not in card_text
-    assert "Show forecast availability" in card_text
+    assert 'forecast: "show_forecast"' in card_text
     assert "Extend timeline with forecast" not in card_text
 
 
@@ -297,7 +298,7 @@ def test_bundled_card_uses_leaflet_osm_map_with_provider_overlays() -> None:
     assert "URL.revokeObjectURL" in card_text
     assert "this._animationIntervalMs()" in card_text
     assert "DEFAULT_ANIMATION_INTERVAL_MS = 550" in card_text
-    assert 'min="250"' in card_text
+    assert "selector: { number: { min: 250, max: 2000, step: 50" in card_text
     assert "1150" not in card_text
     assert "Radar: Regnradar/Vackertväder" in card_text
     assert "scrollWheelZoom: this._config.map_scroll_wheel === true" in card_text

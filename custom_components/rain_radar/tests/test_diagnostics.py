@@ -8,6 +8,7 @@ from custom_components.rain_radar.const import (
     CONF_CONTACT,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    DEFAULT_RADAR_AREA,
 )
 from custom_components.rain_radar.diagnostics import async_get_config_entry_diagnostics
 
@@ -25,3 +26,4 @@ async def test_diagnostics_redact_contact_and_round_location(
     assert diagnostics["entry"]["data"][CONF_CONTACT] == "**REDACTED**"
     assert diagnostics["entry"]["data"][CONF_LATITUDE] == 59.33
     assert diagnostics["entry"]["data"][CONF_LONGITUDE] == 18.07
+    assert diagnostics["provider"]["radar_area"] == DEFAULT_RADAR_AREA

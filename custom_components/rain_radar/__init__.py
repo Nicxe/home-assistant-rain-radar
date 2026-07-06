@@ -35,12 +35,17 @@ from .const import (
     DOMAIN,
     FORECAST_PROVIDER_OPTIONS,
     PLATFORMS,
+    PROVIDER_DMI,
+    PROVIDER_SMHI,
 )
 from .coordinator import RainRadarCoordinator
 from .frontend import async_setup_frontend
+from .providers.base import RainRadarProvider
+from .providers.dmi import DmiProvider
 from .providers.met_no import MetNoProvider
 from .providers.models import Location, RainRadarOptions
 from .providers.regnradar import RegnradarProvider
+from .providers.smhi import SmhiProvider
 from .views import async_register_http_views
 
 _LOGGER = logging.getLogger(__name__)
@@ -216,9 +221,11 @@ def _entry_forecast_provider(entry: ConfigEntry) -> str:
 def _forecast_provider_for(
     client: RainRadarApiClient,
     provider_id: str,
-) -> MetNoProvider:
-    if provider_id == DEFAULT_FORECAST_PROVIDER:
-        return MetNoProvider(client)
+) -> RainRadarProvider:
+    if provider_id == PROVIDER_DMI:
+        return DmiProvider(client)
+    if provider_id == PROVIDER_SMHI:
+        return SmhiProvider(client)
     return MetNoProvider(client)
 
 

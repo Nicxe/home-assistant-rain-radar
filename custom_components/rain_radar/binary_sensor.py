@@ -18,6 +18,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import ATTR_ENTRY_ID, ATTR_IS_STALE, ATTRIBUTION
 from .coordinator import RainRadarCoordinator, RainRadarData
 from .entity import RainRadarEntity
+from .providers.models import CoverageStatus
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -47,7 +48,7 @@ BINARY_SENSORS: tuple[RainRadarBinarySensorDescription, ...] = (
         translation_key="radar_coverage",
         icon="mdi:radar",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: data.provider_status.coverage_status.value == "ok",
+        value_fn=lambda data: data.radar_frames.coverage_status == CoverageStatus.OK,
     ),
 )
 

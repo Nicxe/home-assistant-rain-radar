@@ -13,8 +13,10 @@ from .const import (
     CONF_FORECAST_PROVIDER,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_RADAR_AREA,
     CONF_RADAR_PROVIDER,
     DEFAULT_FORECAST_PROVIDER,
+    DEFAULT_RADAR_AREA,
     DEFAULT_RADAR_PROVIDER,
 )
 
@@ -62,9 +64,15 @@ async def async_get_config_entry_diagnostics(
                 "radar_provider": DEFAULT_RADAR_PROVIDER
                 if coordinator_data
                 else data.get(CONF_RADAR_PROVIDER, DEFAULT_RADAR_PROVIDER),
+                "radar_area": coordinator_data.options.radar_area
+                if coordinator_data
+                else data.get(CONF_RADAR_AREA, DEFAULT_RADAR_AREA),
                 "forecast_provider": coordinator_data.options.forecast_provider
                 if coordinator_data
                 else data.get(CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER),
+                "radar_coverage_status": coordinator_data.radar_frames.coverage_status.value
+                if coordinator_data
+                else None,
                 "last_error": coordinator.last_error_type if coordinator else None,
             },
             "data": {
