@@ -6,7 +6,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/Nicxe/home-assistant-rain-radar)](#) [![Version](https://img.shields.io/github/v/release/Nicxe/home-assistant-rain-radar)](#) ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/nicxe/home-assistant-rain-radar/latest/total)
 
 
-Rain Radar is a custom Home Assistant integration for Nordic rain monitoring. It combines Regnradar radar imagery with selectable MET Norway or SMHI point forecasts so dashboards and automations can answer practical questions such as whether it is raining now, whether rain is expected soon, and how high the rain risk is in the next hours.
+Rain Radar is a custom Home Assistant integration for Nordic rain monitoring. It combines Regnradar radar imagery with selectable MET Norway, SMHI, or DMI point forecasts so dashboards and automations can answer practical questions such as whether it is raining now, whether rain is expected soon, and how high the rain risk is in the next hours.
 
 The integration includes Home Assistant entities, a config flow, options flow, diagnostics, localized Home Assistant setup text, authenticated radar image endpoints, and a bundled Lovelace dashboard card.
 
@@ -23,9 +23,28 @@ The integration includes Home Assistant entities, a config flow, options flow, d
 
 ## Data Sources
 
-Radar imagery comes from [Regnradar/Vackertväder](https://regnradar.se/). Forecast-based entities can use open data from [MET Norway](https://api.met.no/) or [SMHI](https://opendata.smhi.se/).
+Radar imagery always comes from [Regnradar/Vackertväder](https://regnradar.se/). Forecast-based entities can use open data from [MET Norway](https://api.met.no/), [SMHI](https://opendata.smhi.se/), or [DMI](https://www.dmi.dk/friedata/dokumentation-paa-engelsk/).
 
-Regnradar is used for the radar map overlay. The Nordic radar source uses MET frames through Regnradar and can include forecast radar frames when available. The Sweden radar source uses SMHI radar frames through Regnradar. DMI remains future work for Denmark-specific forecast data.
+The radar source and forecast provider are separate settings:
+
+| Setting | Choices | What it affects |
+| --- | --- | --- |
+| Radar source | Nordic, Sweden, Denmark | The map overlay and radar coverage shown in the card. All choices are fetched through Regnradar. |
+| Forecast provider | MET Norway, SMHI, DMI | The Home Assistant precipitation, rain soon, rain arrival, and rain risk entities. |
+
+The Nordic radar source uses MET frames through Regnradar and is the only radar source that can include radar forecast frames when Regnradar exposes them. The Sweden radar source uses SMHI radar frames through Regnradar and currently contains observed radar frames only. The Denmark radar source uses DMI radar frames through Regnradar and currently contains observed radar frames only.
+
+### Provider limitations
+
+Each forecast provider exposes different data, so the entities are normalized as far as possible but not identical in meaning.
+
+| Provider | Best fit | Main limitations |
+| --- | --- | --- |
+| MET Norway | Default forecast provider and best match for the original rain-risk behavior. | Radar imagery still comes from Regnradar. MET point nowcast coverage is not available for every location, and radar forecast map frames are only available through the Nordic Regnradar source when Regnradar exposes them. |
+| SMHI | Swedish point forecasts for rain now, rain soon, arrival, and rain risk. | SMHI forecast data is point/grid-point based and does not add radar forecast frames. The Sweden radar source through Regnradar is observed radar imagery only. |
+| DMI | Denmark-focused point forecasts for rain now, rain soon, and arrival. | DMI does not expose the same general `probability_of_precipitation` signal used by MET Norway and SMHI. Rain risk is therefore threshold-based from DMI precipitation intensity and is reported as `100` when the configured rain threshold is expected to be met, otherwise `0`. DMI forecast data can be rate limited when the Open Data service is busy, so Rain Radar caches responses conservatively and may show stale or unavailable forecast entities until the next successful update. |
+
+Because of these differences, compare `sensor.<name>_rain_risk_12h` values only within the same forecast provider. MET Norway and SMHI can represent forecast probability, while DMI represents whether the configured rain threshold is expected to be met in the forecast horizon.
 
 ## Installation
 
@@ -58,11 +77,11 @@ Set up Rain Radar through Settings > Devices & services > Add Integration > Rain
 | Location name | `Home` | Used as the base name for the created entities. |
 | Latitude | Home Assistant latitude | Must be between `-90` and `90`. |
 | Longitude | Home Assistant longitude | Must be between `-180` and `180`. |
-| Forecast provider | MET Norway | Used for rain arrival, rain soon, precipitation, and rain risk. Choose SMHI for SMHI SNOW1G point forecast data. |
-| Radar source | Nordic | Regnradar source used for radar frames and map coverage. Choose Sweden for SMHI radar frames through Regnradar. |
+| Forecast provider | MET Norway | Used for rain arrival, rain soon, precipitation, and rain risk. Choose SMHI for Swedish point forecast data or DMI for Denmark-focused point forecast data. |
+| Radar source | Nordic | Regnradar source used for radar frames and map coverage. Choose Sweden for SMHI radar frames through Regnradar or Denmark for DMI radar frames through Regnradar. |
 | Rain threshold | `0.1` mm/h | Minimum intensity that counts as rain. |
 | Rain soon window | `60` minutes | Look-ahead window for the rain soon binary sensor. |
-| Sampling radius | `1000` meters | Reserved for provider strategies. MET Norway and SMHI currently use point/grid-point forecasts. |
+| Sampling radius | `1000` meters | Reserved for provider strategies. MET Norway, SMHI, and DMI currently use point/grid-point forecasts. |
 | Rain risk horizon | `12` hours | Forecast horizon inspected by the rain risk sensor. |
 
 The same values can be changed later from the integration options. Setup and options text is available in English, Swedish, Finnish, Norwegian Bokmål, and Danish.
@@ -77,13 +96,13 @@ Rain Radar creates these entities for each configured location. Entity IDs use t
 | `binary_sensor.<name>_rain_soon` | Binary sensor | `on` when rain is expected inside the configured window | Attribution, entry ID, stale status |
 | `binary_sensor.<name>_radar_coverage` | Binary sensor | `on` when radar coverage is available | Attribution, entry ID, stale status |
 | `sensor.<name>_precipitation_now` | Sensor | Current precipitation intensity in mm/h | Forecast samples, threshold, window, stale status |
-| `sensor.<name>_rain_risk_12h` | Sensor | Highest precipitation probability in percent | Hourly probability, precipitation amount, symbol code, update status |
+| `sensor.<name>_rain_risk_12h` | Sensor | Highest normalized rain risk in percent | Hourly risk/probability, precipitation amount, symbol code, update status |
 | `sensor.<name>_rain_arrival` | Sensor | Minutes until expected rain, when known | Attribution and entry ID |
 | `sensor.<name>_data_age` | Sensor | Age of the newest available data in minutes | Attribution and entry ID |
 | `sensor.<name>_provider` | Sensor | Active provider name | Provider IDs, radar source, status, forecast coverage, radar coverage, attribution |
 | `sensor.<name>_latest_radar_time` | Sensor | Timestamp of the latest radar frame | Attribution and entry ID |
 
-Raw provider payloads are not stored as entity attributes. Forecast details are bounded to the values needed by dashboards and automations.
+Raw provider payloads are not stored as entity attributes. Forecast details are bounded to the values needed by dashboards and automations. For MET Norway and SMHI, the rain risk sensor is based on provider precipitation probability where available. For DMI, it is a threshold-based forecast signal because DMI does not provide the same general precipitation probability field.
 
 ## Dashboard Card
 

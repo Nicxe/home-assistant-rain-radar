@@ -18,9 +18,9 @@
         "data_description": {
           "rain_threshold": "Pienin sademäärän intensiteetti mm/h, joka lasketaan sateeksi. Tämä ohjaa nyt satamisen, lähisateen ja sateen saapumisajan laskentaa.",
           "rain_soon_window": "Kuinka monta minuuttia eteenpäin Rain Radar tarkistaa ennen kuin lähisateen binäärianturi kytkeytyy päälle.",
-          "sample_radius_m": "Alue määritetyn sijainnin ympärillä, jota ennustepalvelut voivat käyttää sadetietojen näytteistämiseen. MET Norway ja SMHI käyttävät tällä hetkellä piste-/hilapiste-ennusteita, joten tämä on varattu tuleville parannuksille.",
+          "sample_radius_m": "Alue määritetyn sijainnin ympärillä, jota ennustepalvelut voivat käyttää sadetietojen näytteistämiseen. MET Norway, SMHI ja DMI käyttävät tällä hetkellä piste-/hilapiste-ennusteita, joten tämä on varattu tuleville parannuksille.",
           "forecast_provider": "Palvelu, jota käytetään sateen saapumisen, lähisateen ja saderiskin sensoreille. Tutkakuvat haetaan Regnradarin kautta.",
-          "radar_area": "Regnradarin tutkalähde, jota käytetään karttatasossa. Ruotsi käyttää SMHI-tutkakehyksiä Regnradarin kautta; Pohjola käyttää MET-kehyksiä ja sisältää ennustekehyksiä.",
+          "radar_area": "Regnradarin tutkalähde, jota käytetään karttatasossa. Ruotsi käyttää SMHI-tutkakehyksiä Regnradarin kautta, Tanska käyttää DMI-tutkakehyksiä Regnradarin kautta ja Pohjola käyttää MET-kehyksiä ennustekehyksillä, kun niitä on saatavilla.",
           "rain_risk_horizon_hours": "Kuinka monta tuntia eteenpäin saderiskisensori tarkistaa. Oletus 12 tuntia vastaa aiempaa MET Rain Risk -toimintaa."
         }
       },
@@ -64,9 +64,9 @@
         "data_description": {
           "rain_threshold": "Pienin sademäärän intensiteetti mm/h, joka lasketaan sateeksi. Tämä ohjaa nyt satamisen, lähisateen ja sateen saapumisajan laskentaa.",
           "rain_soon_window": "Kuinka monta minuuttia eteenpäin Rain Radar tarkistaa ennen kuin lähisateen binäärianturi kytkeytyy päälle.",
-          "sample_radius_m": "Alue määritetyn sijainnin ympärillä, jota ennustepalvelut voivat käyttää sadetietojen näytteistämiseen. MET Norway ja SMHI käyttävät tällä hetkellä piste-/hilapiste-ennusteita, joten tämä on varattu tuleville parannuksille.",
+          "sample_radius_m": "Alue määritetyn sijainnin ympärillä, jota ennustepalvelut voivat käyttää sadetietojen näytteistämiseen. MET Norway, SMHI ja DMI käyttävät tällä hetkellä piste-/hilapiste-ennusteita, joten tämä on varattu tuleville parannuksille.",
           "forecast_provider": "Palvelu, jota käytetään sateen saapumisen, lähisateen ja saderiskin sensoreille. Tutkakuvat haetaan Regnradarin kautta.",
-          "radar_area": "Regnradarin tutkalähde, jota käytetään karttatasossa. Ruotsi käyttää SMHI-tutkakehyksiä Regnradarin kautta; Pohjola käyttää MET-kehyksiä ja sisältää ennustekehyksiä.",
+          "radar_area": "Regnradarin tutkalähde, jota käytetään karttatasossa. Ruotsi käyttää SMHI-tutkakehyksiä Regnradarin kautta, Tanska käyttää DMI-tutkakehyksiä Regnradarin kautta ja Pohjola käyttää MET-kehyksiä ennustekehyksillä, kun niitä on saatavilla.",
           "rain_risk_horizon_hours": "Kuinka monta tuntia eteenpäin saderiskisensori tarkistaa. Oletus 12 tuntia vastaa aiempaa MET Rain Risk -toimintaa."
         }
       }

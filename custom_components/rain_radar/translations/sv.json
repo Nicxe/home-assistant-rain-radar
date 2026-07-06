@@ -18,9 +18,9 @@
         "data_description": {
           "rain_threshold": "Minsta nederbördsintensitet i mm/h som räknas som regn. Detta styr regn just nu, regn snart och beräkningar av när regnet anländer.",
           "rain_soon_window": "Hur långt framåt i minuter Rain Radar ska titta innan binärsensorn för regn snart slås på.",
-          "sample_radius_m": "Område runt den konfigurerade platsen som prognosleverantörer kan använda vid sampling av regndata. MET Norway och SMHI använder för närvarande punkt-/gridpunktsprognoser, så detta är reserverat för framtida förbättringar.",
+          "sample_radius_m": "Område runt den konfigurerade platsen som prognosleverantörer kan använda vid sampling av regndata. MET Norway, SMHI och DMI använder för närvarande punkt-/gridpunktsprognoser, så detta är reserverat för framtida förbättringar.",
           "forecast_provider": "Leverantör som används för sensorerna för regnets ankomst, regn snart och regnrisk. Radarbilder hämtas via Regnradar.",
-          "radar_area": "Regnradars radarkälla som används för kartlagret. Sverige använder SMHI-radarramar via Regnradar; Norden använder MET-ramar och innehåller prognosramar.",
+          "radar_area": "Regnradars radarkälla som används för kartlagret. Sverige använder SMHI-radarramar via Regnradar, Danmark använder DMI-radarramar via Regnradar och Norden använder MET-ramar med prognosramar när de finns.",
           "rain_risk_horizon_hours": "Hur många timmar framåt som ska kontrolleras för regnrisksensorn. Standardvärdet 12 timmar matchar tidigare beteende i MET Rain Risk."
         }
       },
@@ -64,9 +64,9 @@
         "data_description": {
           "rain_threshold": "Minsta nederbördsintensitet i mm/h som räknas som regn. Detta styr regn just nu, regn snart och beräkningar av när regnet anländer.",
           "rain_soon_window": "Hur långt framåt i minuter Rain Radar ska titta innan binärsensorn för regn snart slås på.",
-          "sample_radius_m": "Område runt den konfigurerade platsen som prognosleverantörer kan använda vid sampling av regndata. MET Norway och SMHI använder för närvarande punkt-/gridpunktsprognoser, så detta är reserverat för framtida förbättringar.",
+          "sample_radius_m": "Område runt den konfigurerade platsen som prognosleverantörer kan använda vid sampling av regndata. MET Norway, SMHI och DMI använder för närvarande punkt-/gridpunktsprognoser, så detta är reserverat för framtida förbättringar.",
           "forecast_provider": "Leverantör som används för sensorerna för regnets ankomst, regn snart och regnrisk. Radarbilder hämtas via Regnradar.",
-          "radar_area": "Regnradars radarkälla som används för kartlagret. Sverige använder SMHI-radarramar via Regnradar; Norden använder MET-ramar och innehåller prognosramar.",
+          "radar_area": "Regnradars radarkälla som används för kartlagret. Sverige använder SMHI-radarramar via Regnradar, Danmark använder DMI-radarramar via Regnradar och Norden använder MET-ramar med prognosramar när de finns.",
           "rain_risk_horizon_hours": "Hur många timmar framåt som ska kontrolleras för regnrisksensorn. Standardvärdet 12 timmar matchar tidigare beteende i MET Rain Risk."
         }
       }

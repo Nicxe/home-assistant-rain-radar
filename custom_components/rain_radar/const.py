@@ -33,15 +33,17 @@ CONF_SAMPLE_RADIUS_M = "sample_radius_m"
 PROVIDER_MET_NO = "met_no"
 PROVIDER_REGNRADAR = "regnradar"
 PROVIDER_SMHI = "smhi"
+PROVIDER_DMI = "dmi"
 PROVIDER_OPTIONS = [PROVIDER_MET_NO, PROVIDER_REGNRADAR]
 PROVIDER_LABELS = {
     PROVIDER_MET_NO: "MET Norway",
     PROVIDER_REGNRADAR: "Regnradar",
 }
-FORECAST_PROVIDER_OPTIONS = [PROVIDER_MET_NO, PROVIDER_SMHI]
+FORECAST_PROVIDER_OPTIONS = [PROVIDER_MET_NO, PROVIDER_SMHI, PROVIDER_DMI]
 FORECAST_PROVIDER_LABELS = {
     PROVIDER_MET_NO: "MET Norway",
     PROVIDER_SMHI: "SMHI",
+    PROVIDER_DMI: "DMI",
 }
 
 DEFAULT_NAME = "Home"
@@ -88,6 +90,14 @@ SMHI_FORECAST_PARAMETERS = (
 SMHI_FORECAST_URL_TEMPLATE = (
     "https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/"
     "geotype/point/lon/{longitude}/lat/{latitude}/data.json"
+)
+
+DMI_ATTRIBUTION = "Data from DMI"
+DMI_FORECAST_PARAMETERS = (
+    "rain-precipitation-rate,total-precipitation,precipitation-type"
+)
+DMI_FORECAST_URL = (
+    "https://opendataapi.dmi.dk/v1/forecastedr/collections/harmonie_dini_sf/position"
 )
 
 REGNRADAR_ATTRIBUTION = "Radar imagery from Regnradar/Vackertväder"

@@ -18,9 +18,9 @@
         "data_description": {
           "rain_threshold": "Minimum precipitation intensity in mm/h that counts as rain. This controls raining now, rain soon, and arrival calculations.",
           "rain_soon_window": "How far ahead, in minutes, Rain Radar should look before turning on the rain soon binary sensor.",
-          "sample_radius_m": "Area around the configured location that forecast providers may use when sampling rain data. MET Norway and SMHI currently use point/grid-point forecasts, so this is reserved for future provider improvements.",
+          "sample_radius_m": "Area around the configured location that forecast providers may use when sampling rain data. MET Norway, SMHI, and DMI currently use point/grid-point forecasts, so this is reserved for future provider improvements.",
           "forecast_provider": "Provider used for rain arrival, rain soon, and rain risk sensors. Radar imagery is fetched through Regnradar.",
-          "radar_area": "Regnradar radar source used for the map overlay. Sweden uses SMHI radar frames through Regnradar; Nordic uses MET frames and includes forecast frames.",
+          "radar_area": "Regnradar radar source used for the map overlay. Sweden uses SMHI radar frames through Regnradar, Denmark uses DMI radar frames through Regnradar, and Nordic uses MET frames with forecast frames when available.",
           "rain_risk_horizon_hours": "How many hours ahead to inspect for the rain risk sensor. The default 12 hours matches the previous MET Rain Risk behavior."
         }
       },
@@ -64,9 +64,9 @@
         "data_description": {
           "rain_threshold": "Minimum precipitation intensity in mm/h that counts as rain. This controls raining now, rain soon, and arrival calculations.",
           "rain_soon_window": "How far ahead, in minutes, Rain Radar should look before turning on the rain soon binary sensor.",
-          "sample_radius_m": "Area around the configured location that forecast providers may use when sampling rain data. MET Norway and SMHI currently use point/grid-point forecasts, so this is reserved for future provider improvements.",
+          "sample_radius_m": "Area around the configured location that forecast providers may use when sampling rain data. MET Norway, SMHI, and DMI currently use point/grid-point forecasts, so this is reserved for future provider improvements.",
           "forecast_provider": "Provider used for rain arrival, rain soon, and rain risk sensors. Radar imagery is fetched through Regnradar.",
-          "radar_area": "Regnradar radar source used for the map overlay. Sweden uses SMHI radar frames through Regnradar; Nordic uses MET frames and includes forecast frames.",
+          "radar_area": "Regnradar radar source used for the map overlay. Sweden uses SMHI radar frames through Regnradar, Denmark uses DMI radar frames through Regnradar, and Nordic uses MET frames with forecast frames when available.",
           "rain_risk_horizon_hours": "How many hours ahead to inspect for the rain risk sensor. The default 12 hours matches the previous MET Rain Risk behavior."
         }
       }
