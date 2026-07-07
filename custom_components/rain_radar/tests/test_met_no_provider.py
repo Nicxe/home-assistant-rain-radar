@@ -82,6 +82,50 @@ async def test_nowcast_fixture_calculates_rain_arrival() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nowcast_returns_zero_arrival_when_already_raining() -> None:
+    """Test rain arrival is immediate when current precipitation is rain."""
+    now = datetime.now(UTC)
+    provider = MetNoProvider(
+        FakeClient(
+            {
+                "met_no_nowcast": {
+                    "properties": {
+                        "meta": {"updated_at": now.isoformat()},
+                        "timeseries": [
+                            {
+                                "time": (now - timedelta(minutes=5)).isoformat(),
+                                "data": {
+                                    "instant": {
+                                        "details": {"precipitation_rate": 0.4}
+                                    }
+                                },
+                            },
+                            {
+                                "time": (now + timedelta(minutes=20)).isoformat(),
+                                "data": {
+                                    "instant": {
+                                        "details": {"precipitation_rate": 0.0}
+                                    }
+                                },
+                            },
+                        ],
+                    }
+                }
+            }
+        )
+    )
+
+    forecast = await provider.async_get_precipitation_forecast(
+        Location(59.3293, 18.0686),
+        _options(),
+    )
+
+    assert forecast.rain_now is True
+    assert forecast.rain_soon is True
+    assert forecast.rain_arrival_minutes == 0
+
+
+@pytest.mark.asyncio
 async def test_nowcast_fixture_handles_no_precipitation() -> None:
     """Test dry nowcast fixture."""
     provider = MetNoProvider(

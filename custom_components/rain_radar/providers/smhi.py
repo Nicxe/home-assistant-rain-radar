@@ -104,7 +104,9 @@ class SmhiProvider:
             if samples
             else None
         )
-        rain_arrival = _arrival_minutes(samples, options.rain_threshold)
+        rain_arrival = (
+            0 if rain_now is True else _arrival_minutes(samples, options.rain_threshold)
+        )
         rain_soon = (
             rain_arrival is not None
             and rain_arrival <= options.rain_soon_window_minutes
