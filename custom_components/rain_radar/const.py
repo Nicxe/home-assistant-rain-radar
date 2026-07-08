@@ -32,14 +32,18 @@ CONF_SAMPLE_RADIUS_M = "sample_radius_m"
 
 PROVIDER_MET_NO = "met_no"
 PROVIDER_REGNRADAR = "regnradar"
+PROVIDER_SMHI = "smhi"
+PROVIDER_DMI = "dmi"
 PROVIDER_OPTIONS = [PROVIDER_MET_NO, PROVIDER_REGNRADAR]
 PROVIDER_LABELS = {
     PROVIDER_MET_NO: "MET Norway",
     PROVIDER_REGNRADAR: "Regnradar",
 }
-FORECAST_PROVIDER_OPTIONS = [PROVIDER_MET_NO]
+FORECAST_PROVIDER_OPTIONS = [PROVIDER_MET_NO, PROVIDER_SMHI, PROVIDER_DMI]
 FORECAST_PROVIDER_LABELS = {
     PROVIDER_MET_NO: "MET Norway",
+    PROVIDER_SMHI: "SMHI",
+    PROVIDER_DMI: "DMI",
 }
 
 DEFAULT_NAME = "Home"
@@ -76,13 +80,33 @@ MET_NO_RADAR_ANIMATION_URL = (
     f"?type={MET_NO_RADAR_PRODUCT}&area={MET_NO_RADAR_AREA}&content=animation"
 )
 
+SMHI_ATTRIBUTION = "Data from SMHI"
+SMHI_FORECAST_PARAMETERS = (
+    "precipitation_amount_mean,"
+    "probability_of_precipitation,"
+    "predominant_precipitation_type_at_surface,"
+    "symbol_code"
+)
+SMHI_FORECAST_URL_TEMPLATE = (
+    "https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/"
+    "geotype/point/lon/{longitude}/lat/{latitude}/data.json"
+)
+
+DMI_ATTRIBUTION = "Data from DMI"
+DMI_FORECAST_PARAMETERS = (
+    "rain-precipitation-rate,total-precipitation,precipitation-type"
+)
+DMI_FORECAST_URL = (
+    "https://opendataapi.dmi.dk/v1/forecastedr/collections/harmonie_dini_sf/position"
+)
+
 REGNRADAR_ATTRIBUTION = "Radar imagery from Regnradar/Vackertväder"
 REGNRADAR_RADAR_URL = "https://api.regnradar.se/radar"
 REGNRADAR_RADAR_AREAS = ("nordic", "sweden", "denmark")
 REGNRADAR_RADAR_AREA_LABELS = {
-    "nordic": "Nordic",
-    "sweden": "Sweden",
-    "denmark": "Denmark",
+    "nordic": "Nordic (MET via Regnradar)",
+    "sweden": "Sweden (SMHI via Regnradar)",
+    "denmark": "Denmark (DMI via Regnradar)",
 }
 
 CARD_FILENAME = "rain-radar-card.js"
@@ -103,6 +127,7 @@ ATTR_LAST_UPDATED = "last_updated"
 ATTR_PROVIDER = "provider"
 ATTR_PROVIDER_ID = "provider_id"
 ATTR_FORECAST_PROVIDER_ID = "forecast_provider_id"
+ATTR_RADAR_AREA = "radar_area"
 ATTR_RADAR_PROVIDER_ID = "radar_provider_id"
 ATTR_STATUS = "status"
 
