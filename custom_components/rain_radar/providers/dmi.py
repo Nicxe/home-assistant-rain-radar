@@ -33,6 +33,7 @@ from .models import (
 )
 
 _FORECAST_CACHE_TTL = timedelta(minutes=15)
+_RATE_LIMIT_BACKOFF = timedelta(minutes=5)
 _RAIN_RATE_TO_MM_PER_HOUR = 3600
 
 
@@ -64,6 +65,8 @@ class DmiProvider:
         self._coverage_status = CoverageStatus.UNKNOWN
         self._forecast_lock = asyncio.Lock()
         self._forecast_cache: _DmiForecastCache | None = None
+        self._rate_limited_cache_key: str | None = None
+        self._rate_limited_until: datetime | None = None
 
     @property
     def provider_id(self) -> str:
@@ -181,10 +184,14 @@ class DmiProvider:
         cache_key = _cache_key(location, options)
         if cached := self._fresh_cache(cache_key):
             return cached.payload, cached.cache
+        if rate_limited := self._rate_limited_result(cache_key):
+            return rate_limited
 
         async with self._forecast_lock:
             if cached := self._fresh_cache(cache_key):
                 return cached.payload, cached.cache
+            if rate_limited := self._rate_limited_result(cache_key):
+                return rate_limited
 
             try:
                 payload, cache = await self.client.async_get_json(
@@ -208,7 +215,12 @@ class DmiProvider:
                 if isinstance(err, RainRadarApiRateLimitedError) and (
                     stale := self._stale_cache(cache_key)
                 ):
+                    self._mark_rate_limited(cache_key)
                     return stale.payload, stale.cache
+                if isinstance(err, RainRadarApiRateLimitedError):
+                    self._mark_rate_limited(cache_key)
+                    self._coverage_status = CoverageStatus.TEMPORARILY_UNAVAILABLE
+                    return None, CacheMetadata()
                 raise
 
             if not isinstance(payload, dict):
@@ -216,6 +228,8 @@ class DmiProvider:
                 return None, cache
 
             self._forecast_cache = _DmiForecastCache(cache_key, payload, cache)
+            self._rate_limited_cache_key = None
+            self._rate_limited_until = None
             return payload, cache
 
     def _fresh_cache(self, cache_key: str) -> _DmiForecastCache | None:
@@ -233,6 +247,27 @@ class DmiProvider:
         if cached is None or cached.cache_key != cache_key:
             return None
         return cached
+
+    def _mark_rate_limited(self, cache_key: str) -> None:
+        """Pause requests after DMI reports that its service is busy."""
+        self._rate_limited_cache_key = cache_key
+        self._rate_limited_until = datetime.now(UTC) + _RATE_LIMIT_BACKOFF
+
+    def _rate_limited_result(
+        self,
+        cache_key: str,
+    ) -> tuple[dict[str, Any] | None, CacheMetadata] | None:
+        """Reuse stale data, or no data, during the rate-limit backoff."""
+        if (
+            self._rate_limited_cache_key != cache_key
+            or self._rate_limited_until is None
+            or self._rate_limited_until <= datetime.now(UTC)
+        ):
+            return None
+        if stale := self._stale_cache(cache_key):
+            return stale.payload, stale.cache
+        self._coverage_status = CoverageStatus.TEMPORARILY_UNAVAILABLE
+        return None, CacheMetadata()
 
 
 def _cache_key(location: Location, options: RainRadarOptions) -> str:

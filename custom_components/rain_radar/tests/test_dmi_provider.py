@@ -185,6 +185,26 @@ async def test_dmi_rate_limit_reuses_stale_cache() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dmi_rate_limit_without_cache_is_temporarily_unavailable() -> None:
+    """Test a busy DMI service does not prevent integration setup."""
+    client = FakeClient(
+        None,
+        error=RainRadarApiRateLimitedError("Provider rate limited request"),
+    )
+    provider = DmiProvider(client)
+
+    precipitation, rain_risk = await asyncio.gather(
+        provider.async_get_precipitation_forecast(Location(55.715, 12.561), _options()),
+        provider.async_get_rain_risk(Location(55.715, 12.561), _options()),
+    )
+
+    assert precipitation.coverage_status == CoverageStatus.TEMPORARILY_UNAVAILABLE
+    assert precipitation.samples == []
+    assert rain_risk.max_probability is None
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_dmi_outside_coverage_returns_empty_forecast() -> None:
     """Test DMI outside-coverage errors do not fail the coordinator."""
     provider = DmiProvider(

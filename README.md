@@ -51,19 +51,24 @@ Because of these differences, compare `sensor.<name>_rain_risk_12h` values only 
 
 ## Installation
 
-### HACS Custom Repository
+### HACS
 
-Rain Radar is not a HACS default repository yet. Install it as a custom repository:
+Rain Radar is available as a default HACS integration:
+
+#### Option A, My Home Assistant
+
+Click the button below to open Rain Radar in HACS.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Nicxe&repository=home-assistant-rain-radar&category=integration)
+
+#### Option B, Directly in HACS
 
 1. Open HACS in Home Assistant.
-2. Open the three-dot menu.
-3. Select Custom repositories.
-4. Add `https://github.com/Nicxe/home-assistant-rain-radar`.
-5. Select category `Integration`.
-6. Install Rain Radar.
-7. Restart Home Assistant.
+2. Search for `Rain Radar`.
+3. Click Download.
+4. Restart Home Assistant.
 
-[![Open your Home Assistant instance and open the HACS custom repository flow](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Nicxe&repository=home-assistant-rain-radar&category=integration)
+If Rain Radar does not appear in HACS yet, reload HACS or restart Home Assistant so the default repository list is refreshed.
 
 ### Manual Installation
 
@@ -71,9 +76,16 @@ Download `rain_radar.zip` from the latest GitHub release. Extract the archive an
 
 ## Configuration
 
-Set up Rain Radar through Settings > Devices & services > Add Integration > Rain Radar.
+After installation and restart, add Rain Radar to Home Assistant.
 
-[![Open your Home Assistant instance and start configuring Rain Radar](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start?domain=rain_radar)
+[![Open your Home Assistant instance and start configuration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start?domain=rain_radar)
+
+You can also add it manually:
+
+1. Go to Settings > Devices & services.
+2. Click Add Integration.
+3. Search for Rain Radar.
+4. Follow the on-screen instructions.
 
 | Field | Default | Notes |
 | --- | --- | --- |

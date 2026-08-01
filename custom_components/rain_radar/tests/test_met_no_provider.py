@@ -95,17 +95,13 @@ async def test_nowcast_returns_zero_arrival_when_already_raining() -> None:
                             {
                                 "time": (now - timedelta(minutes=5)).isoformat(),
                                 "data": {
-                                    "instant": {
-                                        "details": {"precipitation_rate": 0.4}
-                                    }
+                                    "instant": {"details": {"precipitation_rate": 0.4}}
                                 },
                             },
                             {
                                 "time": (now + timedelta(minutes=20)).isoformat(),
                                 "data": {
-                                    "instant": {
-                                        "details": {"precipitation_rate": 0.0}
-                                    }
+                                    "instant": {"details": {"precipitation_rate": 0.0}}
                                 },
                             },
                         ],
