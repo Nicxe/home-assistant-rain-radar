@@ -133,7 +133,16 @@ class RainRadarCoordinator(DataUpdateCoordinator[RainRadarData]):
             self.last_error_type = type(err).__name__
             raise UpdateFailed(str(err)) from err
 
-        health = ProviderHealth.DEGRADED if errors else ProviderHealth.OK
+        forecast_degraded = (
+            precipitation.coverage_status == CoverageStatus.TEMPORARILY_UNAVAILABLE
+            or precipitation.is_stale
+            or rain_risk.is_stale
+        )
+        health = (
+            ProviderHealth.DEGRADED
+            if errors or forecast_degraded
+            else ProviderHealth.OK
+        )
         self.last_error_type = type(errors[0]).__name__ if errors else None
         now = datetime.now(UTC)
         provider_status = ProviderStatus(
