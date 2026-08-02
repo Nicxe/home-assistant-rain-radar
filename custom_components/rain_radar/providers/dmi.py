@@ -12,7 +12,7 @@ from homeassistant.util import dt as dt_util
 from ..api import (
     RainRadarApiClient,
     RainRadarApiError,
-    RainRadarApiRateLimitedError,
+    RainRadarApiTemporaryError,
 )
 from ..const import (
     DMI_ATTRIBUTION,
@@ -33,7 +33,7 @@ from .models import (
 )
 
 _FORECAST_CACHE_TTL = timedelta(minutes=15)
-_RATE_LIMIT_BACKOFF = timedelta(minutes=5)
+_TEMPORARY_ERROR_BACKOFF = timedelta(minutes=5)
 _RAIN_RATE_TO_MM_PER_HOUR = 3600
 
 
@@ -65,8 +65,8 @@ class DmiProvider:
         self._coverage_status = CoverageStatus.UNKNOWN
         self._forecast_lock = asyncio.Lock()
         self._forecast_cache: _DmiForecastCache | None = None
-        self._rate_limited_cache_key: str | None = None
-        self._rate_limited_until: datetime | None = None
+        self._temporary_error_cache_key: str | None = None
+        self._temporary_error_until: datetime | None = None
 
     @property
     def provider_id(self) -> str:
@@ -184,14 +184,14 @@ class DmiProvider:
         cache_key = _cache_key(location, options)
         if cached := self._fresh_cache(cache_key):
             return cached.payload, cached.cache
-        if rate_limited := self._rate_limited_result(cache_key):
-            return rate_limited
+        if temporary_result := self._temporary_error_result(cache_key):
+            return temporary_result
 
         async with self._forecast_lock:
             if cached := self._fresh_cache(cache_key):
                 return cached.payload, cached.cache
-            if rate_limited := self._rate_limited_result(cache_key):
-                return rate_limited
+            if temporary_result := self._temporary_error_result(cache_key):
+                return temporary_result
 
             try:
                 payload, cache = await self.client.async_get_json(
@@ -212,13 +212,10 @@ class DmiProvider:
                 if _is_outside_coverage_error(err):
                     self._coverage_status = CoverageStatus.OUTSIDE_COVERAGE
                     return None, CacheMetadata()
-                if isinstance(err, RainRadarApiRateLimitedError) and (
-                    stale := self._stale_cache(cache_key)
-                ):
-                    self._mark_rate_limited(cache_key)
-                    return stale.payload, stale.cache
-                if isinstance(err, RainRadarApiRateLimitedError):
-                    self._mark_rate_limited(cache_key)
+                if isinstance(err, RainRadarApiTemporaryError):
+                    self._mark_temporary_error(cache_key)
+                    if stale := self._stale_cache(cache_key):
+                        return stale.payload, stale.cache
                     self._coverage_status = CoverageStatus.TEMPORARILY_UNAVAILABLE
                     return None, CacheMetadata()
                 raise
@@ -228,8 +225,8 @@ class DmiProvider:
                 return None, cache
 
             self._forecast_cache = _DmiForecastCache(cache_key, payload, cache)
-            self._rate_limited_cache_key = None
-            self._rate_limited_until = None
+            self._temporary_error_cache_key = None
+            self._temporary_error_until = None
             return payload, cache
 
     def _fresh_cache(self, cache_key: str) -> _DmiForecastCache | None:
@@ -248,20 +245,20 @@ class DmiProvider:
             return None
         return cached
 
-    def _mark_rate_limited(self, cache_key: str) -> None:
-        """Pause requests after DMI reports that its service is busy."""
-        self._rate_limited_cache_key = cache_key
-        self._rate_limited_until = datetime.now(UTC) + _RATE_LIMIT_BACKOFF
+    def _mark_temporary_error(self, cache_key: str) -> None:
+        """Pause requests after a temporary DMI failure."""
+        self._temporary_error_cache_key = cache_key
+        self._temporary_error_until = datetime.now(UTC) + _TEMPORARY_ERROR_BACKOFF
 
-    def _rate_limited_result(
+    def _temporary_error_result(
         self,
         cache_key: str,
     ) -> tuple[dict[str, Any] | None, CacheMetadata] | None:
-        """Reuse stale data, or no data, during the rate-limit backoff."""
+        """Reuse stale data, or no data, during a temporary-error backoff."""
         if (
-            self._rate_limited_cache_key != cache_key
-            or self._rate_limited_until is None
-            or self._rate_limited_until <= datetime.now(UTC)
+            self._temporary_error_cache_key != cache_key
+            or self._temporary_error_until is None
+            or self._temporary_error_until <= datetime.now(UTC)
         ):
             return None
         if stale := self._stale_cache(cache_key):

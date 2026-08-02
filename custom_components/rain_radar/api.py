@@ -27,7 +27,11 @@ class RainRadarApiAuthError(RainRadarApiError):
     """Authentication or User-Agent/contact error."""
 
 
-class RainRadarApiRateLimitedError(RainRadarApiError):
+class RainRadarApiTemporaryError(RainRadarApiError):
+    """Temporary provider or connection error."""
+
+
+class RainRadarApiRateLimitedError(RainRadarApiTemporaryError):
     """Provider rate limit error."""
 
 
@@ -119,9 +123,9 @@ class RainRadarApiClient:
                     payload = await response.json()
                     metadata = _cache_metadata_from_response(response)
         except TimeoutError as err:
-            raise RainRadarApiError(f"Timed out fetching {url}") from err
+            raise RainRadarApiTemporaryError(f"Timed out fetching {url}") from err
         except ClientError as err:
-            raise RainRadarApiError(f"Error fetching {url}: {err}") from err
+            raise RainRadarApiTemporaryError(f"Error fetching {url}: {err}") from err
 
         self._cache[cache_key] = _CachedResponse(payload, metadata)
         return payload, metadata
@@ -175,9 +179,9 @@ class RainRadarApiClient:
                         "Content-Type", "application/octet-stream"
                     ).split(";", 1)[0]
         except TimeoutError as err:
-            raise RainRadarApiError(f"Timed out fetching {url}") from err
+            raise RainRadarApiTemporaryError(f"Timed out fetching {url}") from err
         except ClientError as err:
-            raise RainRadarApiError(f"Error fetching {url}: {err}") from err
+            raise RainRadarApiTemporaryError(f"Error fetching {url}: {err}") from err
 
         self._cache[cache_key] = _CachedResponse(payload, metadata, content_type)
         return payload, metadata, content_type
@@ -195,6 +199,16 @@ class RainRadarApiClient:
         if response.status == 429:
             raise RainRadarApiRateLimitedError(
                 f"Provider rate limited the request for {url}"
+            )
+        if response.status in (408, 425) or 500 <= response.status < 600:
+            _LOGGER.debug(
+                "Provider request temporarily failed: url=%s status=%s body=%s",
+                url,
+                response.status,
+                body,
+            )
+            raise RainRadarApiTemporaryError(
+                f"Provider temporarily unavailable for {url}: HTTP {response.status}"
             )
 
         _LOGGER.debug(
