@@ -212,6 +212,27 @@ def test_bundled_card_registers_custom_card() -> None:
     assert "type: CARD_TYPE" in card_text
 
 
+def test_bundled_card_resolves_localized_entity_ids_by_stable_key() -> None:
+    """Test related entities do not depend on translated entity IDs."""
+    card_text = Path(frontend._card_file_path()).read_text(encoding="utf-8")
+
+    assert "function findEntity(hass, entryId, entityKey, legacySuffix)" in card_text
+    assert "entity.attributes?.rain_radar_entity_key === entityKey" in card_text
+    assert (
+        'findEntity(hass, entryId, "precipitation_now", "_precipitation_now")'
+        in card_text
+    )
+    assert 'findEntity(hass, entryId, "rain_arrival", "_rain_arrival")' in card_text
+    assert 'findEntity(hass, entryId, "rain_risk_12h", "_rain_risk_12h")' in card_text
+    assert 'findEntity(hass, entryId, "provider", "_provider")' in card_text
+    assert (
+        'findEntity(hass, entryId, "latest_radar_time", "_latest_radar_time")'
+        in card_text
+    )
+    assert 'findEntity(hass, entryId, "radar_coverage", "_radar_coverage")' in card_text
+    assert 'if (value === null || value === undefined) return "Unknown";' in card_text
+
+
 def test_bundled_card_exposes_layer_and_forecast_options() -> None:
     """Test card includes configurable map layers and forecast availability display."""
     card_text = Path(frontend._card_file_path()).read_text(encoding="utf-8")

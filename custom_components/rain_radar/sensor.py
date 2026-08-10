@@ -20,6 +20,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_ENTITY_KEY,
     ATTR_ENTRY_ID,
     ATTR_FORECAST_PROVIDER_ID,
     ATTR_FORECAST_SAMPLES,
@@ -213,6 +214,7 @@ class RainRadarSensor(RainRadarEntity, SensorEntity):
         attrs = {
             ATTRIBUTION: self.coordinator.data.provider_status.attribution,
             ATTR_ENTRY_ID: self._entry_id,
+            ATTR_ENTITY_KEY: self.entity_description.key,
         }
         if self.entity_description.attrs_fn:
             attrs.update(self.entity_description.attrs_fn(self.coordinator.data))
