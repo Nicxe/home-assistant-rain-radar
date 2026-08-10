@@ -11,6 +11,7 @@ import pytest
 from custom_components.rain_radar.api import (
     RainRadarApiError,
     RainRadarApiRateLimitedError,
+    RainRadarApiTemporaryError,
 )
 from custom_components.rain_radar.const import PROVIDER_DMI
 from custom_components.rain_radar.providers.dmi import DmiProvider
@@ -190,6 +191,26 @@ async def test_dmi_rate_limit_without_cache_is_temporarily_unavailable() -> None
     client = FakeClient(
         None,
         error=RainRadarApiRateLimitedError("Provider rate limited request"),
+    )
+    provider = DmiProvider(client)
+
+    precipitation, rain_risk = await asyncio.gather(
+        provider.async_get_precipitation_forecast(Location(55.715, 12.561), _options()),
+        provider.async_get_rain_risk(Location(55.715, 12.561), _options()),
+    )
+
+    assert precipitation.coverage_status == CoverageStatus.TEMPORARILY_UNAVAILABLE
+    assert precipitation.samples == []
+    assert rain_risk.max_probability is None
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_dmi_timeout_without_cache_is_temporarily_unavailable() -> None:
+    """Test a DMI timeout does not fail the coordinator update."""
+    client = FakeClient(
+        None,
+        error=RainRadarApiTemporaryError("Timed out fetching DMI forecast"),
     )
     provider = DmiProvider(client)
 
