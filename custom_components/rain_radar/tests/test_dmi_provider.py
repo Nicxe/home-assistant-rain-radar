@@ -32,10 +32,12 @@ class FakeClient:
         *,
         error: RainRadarApiError | None = None,
         cache: CacheMetadata | None = None,
+        hass=None,
     ) -> None:
         self.payload = payload
         self.error = error
         self.cache = cache
+        self.hass = hass
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
     async def async_get_json(self, cache_key: str, url: str, **kwargs):
@@ -48,6 +50,16 @@ class FakeClient:
             fetched_at=datetime.now(UTC),
             expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
+
+
+class MutableClock:
+    """Mutable UTC clock for cadence and backoff tests."""
+
+    def __init__(self, value: datetime) -> None:
+        self.value = value
+
+    def __call__(self) -> datetime:
+        return self.value
 
 
 def _options() -> RainRadarOptions:
@@ -161,18 +173,84 @@ async def test_dmi_reuses_forecast_payload_for_concurrent_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dmi_cache_follows_model_refresh_cycle() -> None:
+    """Test coordinator updates do not poll DMI between model cycles."""
+    clock = MutableClock(datetime(2026, 8, 14, 6, 4, tzinfo=UTC))
+    client = FakeClient(_payload())
+    provider = DmiProvider(client, now_fn=clock)
+
+    await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+    next_refresh = provider.next_refresh_at
+    assert next_refresh is not None
+
+    clock.value = next_refresh - timedelta(seconds=1)
+    await provider.async_get_rain_risk(Location(55.715, 12.561), _options())
+    assert len(client.calls) == 1
+
+    clock.value = next_refresh + timedelta(seconds=1)
+    await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+    assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_dmi_daily_polling_is_bounded_by_model_cycles() -> None:
+    """Test five-minute coordinator ticks produce about eight daily DMI requests."""
+    start = datetime(2026, 8, 14, tzinfo=UTC)
+    clock = MutableClock(start)
+    client = FakeClient(_payload())
+    provider = DmiProvider(client, now_fn=clock)
+
+    for minutes in range(0, 24 * 60, 5):
+        clock.value = start + timedelta(minutes=minutes)
+        await provider.async_get_precipitation_forecast(
+            Location(55.715, 12.561), _options()
+        )
+
+    assert 8 <= len(client.calls) <= 9
+
+
+@pytest.mark.asyncio
+async def test_dmi_identical_entries_share_inflight_request(hass) -> None:
+    """Test identical DMI entries share one request in a Home Assistant instance."""
+    clock = MutableClock(datetime(2026, 8, 14, 6, 4, tzinfo=UTC))
+    first_client = FakeClient(_payload(), hass=hass)
+    second_client = FakeClient(_payload(), hass=hass)
+    first_provider = DmiProvider(first_client, now_fn=clock)
+    second_provider = DmiProvider(second_client, now_fn=clock)
+
+    first, second = await asyncio.gather(
+        first_provider.async_get_precipitation_forecast(
+            Location(55.715, 12.561), _options()
+        ),
+        second_provider.async_get_rain_risk(Location(55.715, 12.561), _options()),
+    )
+
+    assert first.rain_soon is True
+    assert second.max_probability == 100
+    assert len(first_client.calls) + len(second_client.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_dmi_rate_limit_reuses_stale_cache() -> None:
     """Test DMI can reuse stale provider cache when rate limited."""
+    now = datetime(2026, 8, 14, 6, 4, tzinfo=UTC)
+    clock = MutableClock(now)
     expired_cache = CacheMetadata(
-        fetched_at=datetime.now(UTC) - timedelta(minutes=20),
-        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+        fetched_at=now - timedelta(minutes=20),
+        expires_at=now - timedelta(minutes=1),
     )
     client = FakeClient(_payload(), cache=expired_cache)
-    provider = DmiProvider(client)
+    provider = DmiProvider(client, now_fn=clock)
     await provider.async_get_precipitation_forecast(
         Location(55.715, 12.561),
         _options(),
     )
+    assert provider.next_refresh_at is not None
+    clock.value = provider.next_refresh_at + timedelta(seconds=1)
     client.error = RainRadarApiRateLimitedError("Provider rate limited request")
 
     forecast = await provider.async_get_rain_risk(
@@ -180,9 +258,154 @@ async def test_dmi_rate_limit_reuses_stale_cache() -> None:
         _options(),
     )
 
-    assert forecast.max_probability == 100
     assert forecast.is_stale is True
+    assert forecast.cache.from_cache is True
     assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_dmi_rate_limit_uses_exponential_backoff() -> None:
+    """Test repeated rate limits do not cause five-minute retry loops."""
+    now = datetime(2026, 8, 14, 6, 4, tzinfo=UTC)
+    clock = MutableClock(now)
+    client = FakeClient(
+        _payload(),
+        cache=CacheMetadata(fetched_at=now, expires_at=now + timedelta(minutes=1)),
+    )
+    provider = DmiProvider(client, now_fn=clock)
+    await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+
+    assert provider.next_refresh_at is not None
+    clock.value = provider.next_refresh_at + timedelta(seconds=1)
+    client.error = RainRadarApiRateLimitedError("Provider rate limited request")
+    forecast = await provider.async_get_rain_risk(Location(55.715, 12.561), _options())
+    first_backoff = provider.backoff_until
+
+    assert forecast.is_stale is True
+    assert first_backoff is not None
+    assert first_backoff - clock.value >= timedelta(minutes=15)
+    assert len(client.calls) == 2
+
+    clock.value = first_backoff - timedelta(seconds=1)
+    await provider.async_get_rain_risk(Location(55.715, 12.561), _options())
+    assert len(client.calls) == 2
+
+    clock.value = first_backoff + timedelta(seconds=1)
+    await provider.async_get_rain_risk(Location(55.715, 12.561), _options())
+    second_backoff = provider.backoff_until
+    assert second_backoff is not None
+    assert second_backoff - clock.value >= timedelta(minutes=30)
+    assert len(client.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_dmi_rate_limit_respects_retry_after() -> None:
+    """Test a provider Retry-After delay takes precedence over fallback backoff."""
+    clock = MutableClock(datetime(2026, 8, 14, 6, 4, tzinfo=UTC))
+    client = FakeClient(
+        None,
+        error=RainRadarApiRateLimitedError(
+            "Provider rate limited request", retry_after=7200
+        ),
+    )
+    provider = DmiProvider(client, now_fn=clock)
+
+    await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+
+    assert provider.backoff_until == clock.value + timedelta(hours=2)
+
+
+@pytest.mark.asyncio
+async def test_dmi_success_resets_rate_limit_backoff() -> None:
+    """Test a successful retry restores normal model scheduling."""
+    clock = MutableClock(datetime(2026, 8, 14, 6, 4, tzinfo=UTC))
+    client = FakeClient(
+        None,
+        error=RainRadarApiRateLimitedError("Provider rate limited request"),
+    )
+    provider = DmiProvider(client, now_fn=clock)
+    await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+    assert provider.backoff_until is not None
+
+    clock.value = provider.backoff_until + timedelta(seconds=1)
+    client.error = None
+    client.payload = _payload()
+    await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+
+    assert provider.backoff_until is None
+    assert provider.last_error_type is None
+    assert provider.last_success == clock.value
+
+
+@pytest.mark.asyncio
+async def test_dmi_does_not_publish_expired_stale_current_values() -> None:
+    """Test stale forecasts eventually become unavailable instead of misleading."""
+    now = datetime(2026, 8, 14, 6, 4, tzinfo=UTC)
+    clock = MutableClock(now)
+    client = FakeClient(
+        _payload(),
+        cache=CacheMetadata(fetched_at=now, expires_at=now + timedelta(minutes=1)),
+    )
+    provider = DmiProvider(client, now_fn=clock)
+    await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+
+    clock.value = now + timedelta(hours=7)
+    client.error = RainRadarApiRateLimitedError("Provider rate limited request")
+    forecast = await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+
+    assert forecast.coverage_status == CoverageStatus.TEMPORARILY_UNAVAILABLE
+    assert forecast.current_precipitation is None
+    assert forecast.rain_now is None
+
+
+@pytest.mark.asyncio
+async def test_dmi_ignores_past_rain_when_calculating_arrival() -> None:
+    """Test historical rain is not reported as arriving now."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "properties": {
+                    "step": (now - timedelta(hours=1)).isoformat(),
+                    "rain-precipitation-rate": 0.0002,
+                }
+            },
+            {
+                "properties": {
+                    "step": (now - timedelta(minutes=10)).isoformat(),
+                    "rain-precipitation-rate": 0.0,
+                }
+            },
+            {
+                "properties": {
+                    "step": (now + timedelta(minutes=20)).isoformat(),
+                    "rain-precipitation-rate": 0.0,
+                }
+            },
+        ],
+    }
+    provider = DmiProvider(FakeClient(payload))
+
+    forecast = await provider.async_get_precipitation_forecast(
+        Location(55.715, 12.561), _options()
+    )
+
+    assert forecast.rain_now is False
+    assert forecast.rain_arrival_minutes is None
+    assert forecast.rain_soon is False
 
 
 @pytest.mark.asyncio
