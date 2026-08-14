@@ -75,6 +75,14 @@ class TemporarilyUnavailableProvider(FakeProvider):
         return RainRiskForecast(max_probability=None)
 
 
+class RateLimitedProvider(TemporarilyUnavailableProvider):
+    """Fake provider exposing a swallowed rate-limit error."""
+
+    last_error = "Provider rate limited the request"
+    last_error_type = "RainRadarApiRateLimitedError"
+    last_success = datetime(2026, 8, 14, 5, tzinfo=UTC)
+
+
 @pytest.mark.asyncio
 async def test_coordinator_exposes_normalized_data(
     hass: HomeAssistant,
@@ -135,4 +143,38 @@ async def test_coordinator_accepts_temporarily_unavailable_forecast(
     assert (
         coordinator.data.provider_status.coverage_status
         == CoverageStatus.TEMPORARILY_UNAVAILABLE
+    )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_exposes_provider_rate_limit_status(
+    hass: HomeAssistant,
+    rain_radar_config_entry,
+) -> None:
+    """Test swallowed provider failures remain visible in coordinator status."""
+    coordinator = RainRadarCoordinator(
+        hass,
+        config_entry=rain_radar_config_entry,
+        provider=RateLimitedProvider(),
+        location=Location(59.3293, 18.0686),
+        options=RainRadarOptions(
+            contact="rain-radar@example.com",
+            forecast_provider="dmi",
+            radar_area="nordic",
+            rain_threshold=0.1,
+            rain_soon_window_minutes=60,
+            sample_radius_m=1000,
+            rain_risk_horizon_hours=12,
+        ),
+    )
+
+    await coordinator.async_refresh()
+
+    assert coordinator.last_error_type == "RainRadarApiRateLimitedError"
+    assert coordinator.data is not None
+    assert coordinator.data.provider_status.message == (
+        "Provider rate limited the request"
+    )
+    assert coordinator.data.provider_status.last_success == datetime(
+        2026, 8, 14, 5, tzinfo=UTC
     )
