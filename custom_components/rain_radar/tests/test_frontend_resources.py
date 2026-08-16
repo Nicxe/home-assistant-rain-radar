@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.const import CONF_ID, CONF_TYPE
@@ -326,7 +328,16 @@ def test_bundled_card_uses_leaflet_osm_map_with_provider_overlays() -> None:
     assert 'MAP_TILE_REFERRER_POLICY = "strict-origin-when-cross-origin"' in card_text
     assert "referrerPolicy: MAP_TILE_REFERRER_POLICY" in card_text
     assert "interactive: false" in card_text
-    assert "tile.openstreetmap.org" in card_text
+    tile_url_match = re.search(
+        r'^const DEFAULT_TILE_URL = "(?P<url>https://[^"\n]+)";$',
+        card_text,
+        re.MULTILINE,
+    )
+    assert tile_url_match is not None
+    tile_url = urlsplit(tile_url_match.group("url"))
+    assert tile_url.scheme == "https"
+    assert tile_url.hostname == "tile.openstreetmap.org"
+    assert tile_url.path == "/{z}/{x}/{y}.png"
     assert "L.CRS.Simple" not in card_text
     assert "RADAR_PIXEL_TRANSFORM" not in card_text
     assert "unpkg.com" not in card_text
