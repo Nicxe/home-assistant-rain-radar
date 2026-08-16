@@ -97,12 +97,18 @@ async def test_entities_are_created_with_expected_states(
     assert "hourly" in attrs
     assert len(attrs["hourly"]) == 1
     assert attrs["rain_radar_entry_id"] == rain_radar_config_entry.entry_id
+    assert attrs["rain_radar_entity_key"] == "rain_risk_12h"
 
     precipitation_attrs = hass.states.get("sensor.home_precipitation_now").attributes
+    assert precipitation_attrs["rain_radar_entity_key"] == "precipitation_now"
     assert precipitation_attrs["rain_threshold"] == 0.1
     assert precipitation_attrs["rain_soon_window_minutes"] == 60
 
+    rain_soon_attrs = hass.states.get("binary_sensor.home_rain_soon").attributes
+    assert rain_soon_attrs["rain_radar_entity_key"] == "rain_soon"
+
     provider_attrs = hass.states.get("sensor.home_provider").attributes
+    assert provider_attrs["rain_radar_entity_key"] == "provider"
     assert provider_attrs["radar_provider_id"] == "regnradar"
     assert provider_attrs["radar_area"] == "nordic"
     assert provider_attrs["forecast_provider_id"] == "met_no"

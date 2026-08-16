@@ -120,6 +120,7 @@ FRONTEND_DATA_KEY = f"{DOMAIN}_frontend"
 
 ATTRIBUTION = "attribution"
 ATTR_ENTRY_ID = "rain_radar_entry_id"
+ATTR_ENTITY_KEY = "rain_radar_entity_key"
 ATTR_FORECAST_SAMPLES = "forecast_samples"
 ATTR_HOURLY = "hourly"
 ATTR_IS_STALE = "is_stale"

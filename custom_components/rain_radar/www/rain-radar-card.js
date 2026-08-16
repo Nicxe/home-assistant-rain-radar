@@ -201,6 +201,7 @@ function minuteValue(value) {
 }
 
 function numberText(value, suffix = "") {
+  if (value === null || value === undefined) return "Unknown";
   const number = Number(value);
   if (!Number.isFinite(number)) return "Unknown";
   return `${Math.round(number * 10) / 10}${suffix}`;
@@ -247,11 +248,16 @@ function locationNameFromEntity(main) {
   return name.replace(/\s+rain\s+soon$/i, "").trim();
 }
 
-function findEntityBySuffix(hass, entryId, suffix) {
-  return Object.values(hass.states).find((entity) => {
+function findEntity(hass, entryId, entityKey, legacySuffix) {
+  const entryEntities = Object.values(hass.states).filter((entity) => {
     const attrs = entity.attributes || {};
-    return attrs.rain_radar_entry_id === entryId && entity.entity_id.endsWith(suffix);
+    return attrs.rain_radar_entry_id === entryId;
   });
+  return (
+    entryEntities.find(
+      (entity) => entity.attributes?.rain_radar_entity_key === entityKey
+    ) || entryEntities.find((entity) => entity.entity_id.endsWith(legacySuffix))
+  );
 }
 
 function dispatchConfigChanged(element, config) {
@@ -769,16 +775,22 @@ class RainRadarCard extends HTMLElement {
     const main = hass?.states?.[this._config?.entity];
     const entryId = main?.attributes?.rain_radar_entry_id;
     const precipitation = entryId
-      ? findEntityBySuffix(hass, entryId, "_precipitation_now")
+      ? findEntity(hass, entryId, "precipitation_now", "_precipitation_now")
       : null;
-    const arrival = entryId ? findEntityBySuffix(hass, entryId, "_rain_arrival") : null;
-    const risk = entryId ? findEntityBySuffix(hass, entryId, "_rain_risk_12h") : null;
-    const provider = entryId ? findEntityBySuffix(hass, entryId, "_provider") : null;
+    const arrival = entryId
+      ? findEntity(hass, entryId, "rain_arrival", "_rain_arrival")
+      : null;
+    const risk = entryId
+      ? findEntity(hass, entryId, "rain_risk_12h", "_rain_risk_12h")
+      : null;
+    const provider = entryId
+      ? findEntity(hass, entryId, "provider", "_provider")
+      : null;
     const radarTime = entryId
-      ? findEntityBySuffix(hass, entryId, "_latest_radar_time")
+      ? findEntity(hass, entryId, "latest_radar_time", "_latest_radar_time")
       : null;
     const coverage = entryId
-      ? findEntityBySuffix(hass, entryId, "_radar_coverage")
+      ? findEntity(hass, entryId, "radar_coverage", "_radar_coverage")
       : null;
     const forecastWindow = clamp(
       Number(this._config?.forecast_minutes || DEFAULT_CONFIG.forecast_minutes),

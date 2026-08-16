@@ -138,21 +138,33 @@ class RainRadarCoordinator(DataUpdateCoordinator[RainRadarData]):
             or precipitation.is_stale
             or rain_risk.is_stale
         )
+        forecast_provider = getattr(self.provider, "forecast_provider", self.provider)
+        provider_last_error = getattr(forecast_provider, "last_error", None)
+        provider_last_error_type = getattr(forecast_provider, "last_error_type", None)
+        provider_last_success = getattr(forecast_provider, "last_success", None)
         health = (
             ProviderHealth.DEGRADED
             if errors or forecast_degraded
             else ProviderHealth.OK
         )
-        self.last_error_type = type(errors[0]).__name__ if errors else None
         now = datetime.now(UTC)
+        if errors:
+            self.last_error_type = type(errors[0]).__name__
+            last_success = None
+        elif forecast_degraded:
+            self.last_error_type = provider_last_error_type
+            last_success = provider_last_success
+        else:
+            self.last_error_type = None
+            last_success = now
         provider_status = ProviderStatus(
             provider_id=self.provider.provider_id,
             provider_name=self.provider.provider_name,
             attribution=self.provider.attribution,
             coverage_status=precipitation.coverage_status,
             health=health,
-            message=str(errors[0]) if errors else None,
-            last_success=now if not errors else None,
+            message=str(errors[0]) if errors else provider_last_error,
+            last_success=last_success,
             last_error=self.last_error_type,
         )
 

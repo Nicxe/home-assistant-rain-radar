@@ -40,6 +40,13 @@ async def async_get_config_entry_diagnostics(
     runtime_data = getattr(entry, "runtime_data", None)
     coordinator = runtime_data.coordinator if runtime_data else None
     coordinator_data = coordinator.data if coordinator else None
+    runtime_provider = runtime_data.provider if runtime_data else None
+    forecast_provider = getattr(
+        runtime_provider,
+        "forecast_provider",
+        runtime_provider,
+    )
+    forecast_request = getattr(forecast_provider, "diagnostics", {})
 
     return async_redact_data(
         {
@@ -74,6 +81,7 @@ async def async_get_config_entry_diagnostics(
                 if coordinator_data
                 else None,
                 "last_error": coordinator.last_error_type if coordinator else None,
+                "forecast_request": forecast_request,
             },
             "data": {
                 "last_update_success": coordinator.last_update_success

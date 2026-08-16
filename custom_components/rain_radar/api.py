@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -17,6 +18,7 @@ from .const import get_user_agent
 from .providers.models import CacheMetadata
 
 _LOGGER = logging.getLogger(__name__)
+_MAX_CACHE_ENTRIES = 256
 
 
 class RainRadarApiError(Exception):
@@ -27,8 +29,17 @@ class RainRadarApiAuthError(RainRadarApiError):
     """Authentication or User-Agent/contact error."""
 
 
-class RainRadarApiRateLimitedError(RainRadarApiError):
+class RainRadarApiTemporaryError(RainRadarApiError):
+    """Temporary provider or connection error."""
+
+
+class RainRadarApiRateLimitedError(RainRadarApiTemporaryError):
     """Provider rate limit error."""
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        """Initialize a rate-limit error with an optional retry delay."""
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 @dataclass(slots=True)
@@ -47,7 +58,7 @@ class RainRadarApiClient:
         """Initialize the API client."""
         self.hass = hass
         self._contact = contact.strip()
-        self._cache: dict[str, _CachedResponse] = {}
+        self._cache: OrderedDict[str, _CachedResponse] = OrderedDict()
 
     @property
     def contact(self) -> str:
@@ -85,6 +96,7 @@ class RainRadarApiClient:
         *,
         params: dict[str, Any] | None = None,
         request_timeout: int = 15,
+        auth_required: bool = True,
     ) -> tuple[dict[str, Any] | list[Any], CacheMetadata]:
         """Fetch JSON and reuse cached payload on 304 responses."""
         session = aiohttp_client.async_get_clientsession(self.hass)
@@ -99,15 +111,9 @@ class RainRadarApiClient:
                             raise RainRadarApiError(
                                 f"{url} returned 304 without cached data"
                             )
-                        metadata = CacheMetadata(
-                            fetched_at=datetime.now(UTC),
-                            expires_at=cached.metadata.expires_at,
-                            etag=cached.metadata.etag,
-                            last_modified=cached.metadata.last_modified,
-                            from_cache=True,
-                        )
-                        self._cache[cache_key] = _CachedResponse(
-                            cached.payload, metadata
+                        metadata = _validated_cache_metadata(response, cached.metadata)
+                        self._store_cache(
+                            cache_key, _CachedResponse(cached.payload, metadata)
                         )
                         if not isinstance(cached.payload, (dict, list)):
                             raise RainRadarApiError(
@@ -115,15 +121,17 @@ class RainRadarApiClient:
                             )
                         return cached.payload, metadata
 
-                    await self._raise_for_status(response, url)
+                    await self._raise_for_status(
+                        response, url, auth_required=auth_required
+                    )
                     payload = await response.json()
                     metadata = _cache_metadata_from_response(response)
         except TimeoutError as err:
-            raise RainRadarApiError(f"Timed out fetching {url}") from err
+            raise RainRadarApiTemporaryError(f"Timed out fetching {url}") from err
         except ClientError as err:
-            raise RainRadarApiError(f"Error fetching {url}: {err}") from err
+            raise RainRadarApiTemporaryError(f"Error fetching {url}: {err}") from err
 
-        self._cache[cache_key] = _CachedResponse(payload, metadata)
+        self._store_cache(cache_key, _CachedResponse(payload, metadata))
         return payload, metadata
 
     async def async_get_bytes(
@@ -152,15 +160,12 @@ class RainRadarApiClient:
                             raise RainRadarApiError(
                                 f"{url} returned cached non-binary data"
                             )
-                        metadata = CacheMetadata(
-                            fetched_at=datetime.now(UTC),
-                            expires_at=cached.metadata.expires_at,
-                            etag=cached.metadata.etag,
-                            last_modified=cached.metadata.last_modified,
-                            from_cache=True,
-                        )
-                        self._cache[cache_key] = _CachedResponse(
-                            cached.payload, metadata, cached.content_type
+                        metadata = _validated_cache_metadata(response, cached.metadata)
+                        self._store_cache(
+                            cache_key,
+                            _CachedResponse(
+                                cached.payload, metadata, cached.content_type
+                            ),
                         )
                         return (
                             cached.payload,
@@ -175,26 +180,56 @@ class RainRadarApiClient:
                         "Content-Type", "application/octet-stream"
                     ).split(";", 1)[0]
         except TimeoutError as err:
-            raise RainRadarApiError(f"Timed out fetching {url}") from err
+            raise RainRadarApiTemporaryError(f"Timed out fetching {url}") from err
         except ClientError as err:
-            raise RainRadarApiError(f"Error fetching {url}: {err}") from err
+            raise RainRadarApiTemporaryError(f"Error fetching {url}: {err}") from err
 
-        self._cache[cache_key] = _CachedResponse(payload, metadata, content_type)
+        self._store_cache(cache_key, _CachedResponse(payload, metadata, content_type))
         return payload, metadata, content_type
 
-    async def _raise_for_status(self, response: ClientResponse, url: str) -> None:
+    def _store_cache(self, cache_key: str, cached: _CachedResponse) -> None:
+        """Store a bounded response cache entry."""
+        self._cache[cache_key] = cached
+        self._cache.move_to_end(cache_key)
+        while len(self._cache) > _MAX_CACHE_ENTRIES:
+            self._cache.popitem(last=False)
+
+    async def _raise_for_status(
+        self,
+        response: ClientResponse,
+        url: str,
+        *,
+        auth_required: bool = True,
+    ) -> None:
         if response.status == 200:
             return
 
         text = await response.text()
         body = text[:300]
         if response.status in (401, 403):
+            if not auth_required:
+                raise RainRadarApiRateLimitedError(
+                    f"Provider rejected the keyless request for {url}: "
+                    f"HTTP {response.status}",
+                    retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+                )
             raise RainRadarApiAuthError(
                 f"Provider rejected the request for {url}: HTTP {response.status}"
             )
         if response.status == 429:
             raise RainRadarApiRateLimitedError(
-                f"Provider rate limited the request for {url}"
+                f"Provider rate limited the request for {url}",
+                retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+            )
+        if response.status in (408, 425) or 500 <= response.status < 600:
+            _LOGGER.debug(
+                "Provider request temporarily failed: url=%s status=%s body=%s",
+                url,
+                response.status,
+                body,
+            )
+            raise RainRadarApiTemporaryError(
+                f"Provider temporarily unavailable for {url}: HTTP {response.status}"
             )
 
         _LOGGER.debug(
@@ -222,6 +257,26 @@ def _cache_metadata_from_response(response: ClientResponse) -> CacheMetadata:
     )
 
 
+def _validated_cache_metadata(
+    response: ClientResponse,
+    cached: CacheMetadata,
+) -> CacheMetadata:
+    """Merge cache headers after a successful conditional validation."""
+    metadata = _cache_metadata_from_response(response)
+    expires_at = metadata.expires_at
+    if expires_at is None and cached.expires_at is not None:
+        if cached.expires_at > metadata.fetched_at:
+            expires_at = cached.expires_at
+
+    return CacheMetadata(
+        fetched_at=metadata.fetched_at,
+        expires_at=expires_at,
+        etag=metadata.etag or cached.etag,
+        last_modified=metadata.last_modified or cached.last_modified,
+        from_cache=True,
+    )
+
+
 def _parse_expires(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -246,3 +301,21 @@ def _parse_cache_control_max_age(value: str | None) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse Retry-After delta seconds or an HTTP date."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=UTC)
+    return max(0.0, (retry_at.astimezone(UTC) - datetime.now(UTC)).total_seconds())

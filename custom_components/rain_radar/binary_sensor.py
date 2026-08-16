@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import ATTR_ENTRY_ID, ATTR_IS_STALE, ATTRIBUTION
+from .const import ATTR_ENTITY_KEY, ATTR_ENTRY_ID, ATTR_IS_STALE, ATTRIBUTION
 from .coordinator import RainRadarCoordinator, RainRadarData
 from .entity import RainRadarEntity
 from .providers.models import CoverageStatus
@@ -104,5 +104,6 @@ class RainRadarBinarySensor(RainRadarEntity, BinarySensorEntity):
         return {
             ATTRIBUTION: self.coordinator.data.provider_status.attribution,
             ATTR_ENTRY_ID: self._entry_id,
+            ATTR_ENTITY_KEY: self.entity_description.key,
             ATTR_IS_STALE: self.coordinator.data.precipitation.is_stale,
         }
