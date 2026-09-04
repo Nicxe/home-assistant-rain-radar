@@ -94,7 +94,7 @@ class RainRadarBinarySensor(RainRadarEntity, BinarySensorEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.data is not None
+        return super().available and self.coordinator.data is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

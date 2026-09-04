@@ -53,7 +53,7 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
 
     try:
         latitude = float(user_input[CONF_LATITUDE])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         errors[CONF_LATITUDE] = "invalid_latitude"
     else:
         if not -90 <= latitude <= 90:
@@ -61,7 +61,7 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
 
     try:
         longitude = float(user_input[CONF_LONGITUDE])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         errors[CONF_LONGITUDE] = "invalid_longitude"
     else:
         if not -180 <= longitude <= 180:
@@ -79,7 +79,7 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
 
     try:
         rain_threshold = float(user_input[CONF_RAIN_THRESHOLD])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         errors[CONF_RAIN_THRESHOLD] = "invalid_rain_threshold"
     else:
         if rain_threshold < 0:
@@ -87,7 +87,7 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
 
     try:
         rain_soon_window = int(user_input[CONF_RAIN_SOON_WINDOW])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         errors[CONF_RAIN_SOON_WINDOW] = "invalid_rain_soon_window"
     else:
         if not MIN_RAIN_SOON_WINDOW <= rain_soon_window <= MAX_RAIN_SOON_WINDOW:
@@ -95,7 +95,7 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
 
     try:
         sample_radius = int(user_input[CONF_SAMPLE_RADIUS_M])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         errors[CONF_SAMPLE_RADIUS_M] = "invalid_sample_radius"
     else:
         if not MIN_SAMPLE_RADIUS_M <= sample_radius <= MAX_SAMPLE_RADIUS_M:
@@ -103,7 +103,7 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
 
     try:
         horizon = int(user_input[CONF_RAIN_RISK_HORIZON_HOURS])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         errors[CONF_RAIN_RISK_HORIZON_HOURS] = "invalid_rain_risk_horizon"
     else:
         if not MIN_RAIN_RISK_HORIZON_HOURS <= horizon <= MAX_RAIN_RISK_HORIZON_HOURS:

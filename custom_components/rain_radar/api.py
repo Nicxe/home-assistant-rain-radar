@@ -7,10 +7,12 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
+import json
 import logging
+import math
 from typing import Any
 
-from aiohttp import ClientError, ClientResponse
+from aiohttp import ClientError, ClientResponse, ContentTypeError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 
@@ -24,6 +26,18 @@ _MAX_CACHE_ENTRIES = 256
 class RainRadarApiError(Exception):
     """Base API error."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """Initialize an error with safe, structured request diagnostics."""
+        super().__init__(message)
+        self.status_code = status_code
+        self.reason = reason
+
 
 class RainRadarApiAuthError(RainRadarApiError):
     """Authentication or User-Agent/contact error."""
@@ -32,14 +46,21 @@ class RainRadarApiAuthError(RainRadarApiError):
 class RainRadarApiTemporaryError(RainRadarApiError):
     """Temporary provider or connection error."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after: float | None = None,
+        status_code: int | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """Initialize a temporary error with the provider's retry delay."""
+        super().__init__(message, status_code=status_code, reason=reason)
+        self.retry_after = retry_after
+
 
 class RainRadarApiRateLimitedError(RainRadarApiTemporaryError):
     """Provider rate limit error."""
-
-    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
-        """Initialize a rate-limit error with an optional retry delay."""
-        super().__init__(message)
-        self.retry_after = retry_after
 
 
 @dataclass(slots=True)
@@ -100,36 +121,54 @@ class RainRadarApiClient:
     ) -> tuple[dict[str, Any] | list[Any], CacheMetadata]:
         """Fetch JSON and reuse cached payload on 304 responses."""
         session = aiohttp_client.async_get_clientsession(self.hass)
+        cached = self._cache.get(cache_key)
         headers = self._headers(cache_key)
 
         try:
             async with asyncio.timeout(request_timeout):
                 async with session.get(url, params=params, headers=headers) as response:
                     if response.status == 304:
-                        cached = self._cache.get(cache_key)
                         if cached is None:
                             raise RainRadarApiError(
-                                f"{url} returned 304 without cached data"
+                                f"{url} returned 304 without cached data",
+                                status_code=304,
+                                reason="invalid_response",
+                            )
+                        if not isinstance(cached.payload, (dict, list)):
+                            raise RainRadarApiError(
+                                f"{url} returned cached non-JSON data",
+                                status_code=304,
+                                reason="invalid_response",
                             )
                         metadata = _validated_cache_metadata(response, cached.metadata)
                         self._store_cache(
                             cache_key, _CachedResponse(cached.payload, metadata)
                         )
-                        if not isinstance(cached.payload, (dict, list)):
-                            raise RainRadarApiError(
-                                f"{url} returned cached non-JSON data"
-                            )
                         return cached.payload, metadata
 
                     await self._raise_for_status(
                         response, url, auth_required=auth_required
                     )
-                    payload = await response.json()
+                    try:
+                        payload = await response.json()
+                    except (ContentTypeError, ValueError) as err:
+                        raise RainRadarApiTemporaryError(
+                            f"Invalid JSON response from {url}",
+                            status_code=response.status,
+                            reason="invalid_response",
+                            retry_after=_parse_retry_after(
+                                response.headers.get("Retry-After")
+                            ),
+                        ) from err
                     metadata = _cache_metadata_from_response(response)
         except TimeoutError as err:
-            raise RainRadarApiTemporaryError(f"Timed out fetching {url}") from err
+            raise RainRadarApiTemporaryError(
+                f"Timed out fetching {url}", reason="timeout"
+            ) from err
         except ClientError as err:
-            raise RainRadarApiTemporaryError(f"Error fetching {url}: {err}") from err
+            raise RainRadarApiTemporaryError(
+                f"Error fetching {url}: {err}", reason="network"
+            ) from err
 
         self._store_cache(cache_key, _CachedResponse(payload, metadata))
         return payload, metadata
@@ -145,20 +184,24 @@ class RainRadarApiClient:
     ) -> tuple[bytes, CacheMetadata, str]:
         """Fetch bytes and reuse cached payload on 304 responses."""
         session = aiohttp_client.async_get_clientsession(self.hass)
+        cached = self._cache.get(cache_key)
         headers = self._headers(cache_key, accept=accept)
 
         try:
             async with asyncio.timeout(request_timeout):
                 async with session.get(url, params=params, headers=headers) as response:
                     if response.status == 304:
-                        cached = self._cache.get(cache_key)
                         if cached is None:
                             raise RainRadarApiError(
-                                f"{url} returned 304 without cached data"
+                                f"{url} returned 304 without cached data",
+                                status_code=304,
+                                reason="invalid_response",
                             )
                         if not isinstance(cached.payload, bytes):
                             raise RainRadarApiError(
-                                f"{url} returned cached non-binary data"
+                                f"{url} returned cached non-binary data",
+                                status_code=304,
+                                reason="invalid_response",
                             )
                         metadata = _validated_cache_metadata(response, cached.metadata)
                         self._store_cache(
@@ -180,9 +223,13 @@ class RainRadarApiClient:
                         "Content-Type", "application/octet-stream"
                     ).split(";", 1)[0]
         except TimeoutError as err:
-            raise RainRadarApiTemporaryError(f"Timed out fetching {url}") from err
+            raise RainRadarApiTemporaryError(
+                f"Timed out fetching {url}", reason="timeout"
+            ) from err
         except ClientError as err:
-            raise RainRadarApiTemporaryError(f"Error fetching {url}: {err}") from err
+            raise RainRadarApiTemporaryError(
+                f"Error fetching {url}: {err}", reason="network"
+            ) from err
 
         self._store_cache(cache_key, _CachedResponse(payload, metadata, content_type))
         return payload, metadata, content_type
@@ -212,14 +259,26 @@ class RainRadarApiClient:
                     f"Provider rejected the keyless request for {url}: "
                     f"HTTP {response.status}",
                     retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+                    status_code=response.status,
+                    reason="request_rejected",
                 )
             raise RainRadarApiAuthError(
-                f"Provider rejected the request for {url}: HTTP {response.status}"
+                f"Provider rejected the request for {url}: HTTP {response.status}",
+                status_code=response.status,
+                reason="request_rejected",
             )
         if response.status == 429:
+            reason = _rate_limit_reason(text)
+            message = (
+                f"Provider temporarily busy for {url}: HTTP 429"
+                if reason == "server_busy"
+                else f"Provider rate limited the request for {url}"
+            )
             raise RainRadarApiRateLimitedError(
-                f"Provider rate limited the request for {url}",
+                message,
                 retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+                status_code=response.status,
+                reason=reason,
             )
         if response.status in (408, 425) or 500 <= response.status < 600:
             _LOGGER.debug(
@@ -229,7 +288,10 @@ class RainRadarApiClient:
                 body,
             )
             raise RainRadarApiTemporaryError(
-                f"Provider temporarily unavailable for {url}: HTTP {response.status}"
+                f"Provider temporarily unavailable for {url}: HTTP {response.status}",
+                status_code=response.status,
+                reason="server_error" if response.status >= 500 else "http_error",
+                retry_after=_parse_retry_after(response.headers.get("Retry-After")),
             )
 
         _LOGGER.debug(
@@ -238,7 +300,25 @@ class RainRadarApiClient:
             response.status,
             body,
         )
-        raise RainRadarApiError(f"Provider returned HTTP {response.status}: {body}")
+        raise RainRadarApiError(
+            f"Provider returned HTTP {response.status}: {body}",
+            status_code=response.status,
+            reason="http_error",
+        )
+
+
+def _rate_limit_reason(body: str) -> str:
+    """Distinguish DMI's known busy response from other HTTP 429 responses."""
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return "rate_limited"
+    if (
+        isinstance(payload, dict)
+        and payload.get("message") == "Server is busy. Please try again later."
+    ):
+        return "server_busy"
+    return "rate_limited"
 
 
 def _cache_metadata_from_response(response: ClientResponse) -> CacheMetadata:
@@ -264,9 +344,12 @@ def _validated_cache_metadata(
     """Merge cache headers after a successful conditional validation."""
     metadata = _cache_metadata_from_response(response)
     expires_at = metadata.expires_at
-    if expires_at is None and cached.expires_at is not None:
-        if cached.expires_at > metadata.fetched_at:
-            expires_at = cached.expires_at
+    if (
+        expires_at is None
+        and cached.expires_at is not None
+        and cached.expires_at > metadata.fetched_at
+    ):
+        expires_at = cached.expires_at
 
     return CacheMetadata(
         fetched_at=metadata.fetched_at,
@@ -282,7 +365,7 @@ def _parse_expires(value: str | None) -> datetime | None:
         return None
     try:
         parsed = parsedate_to_datetime(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
@@ -308,14 +391,23 @@ def _parse_retry_after(value: str | None) -> float | None:
     if not value:
         return None
     try:
-        return max(0.0, float(value))
+        delay = float(value)
     except ValueError:
         pass
+    else:
+        if not math.isfinite(delay):
+            return None
+        delay = max(0.0, delay)
+        try:
+            datetime.now(UTC) + timedelta(seconds=delay)
+        except OverflowError:
+            return None
+        return delay
 
     try:
         retry_at = parsedate_to_datetime(value)
-    except (TypeError, ValueError):
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        return max(0.0, (retry_at.astimezone(UTC) - datetime.now(UTC)).total_seconds())
+    except TypeError, ValueError, OverflowError:
         return None
-    if retry_at.tzinfo is None:
-        retry_at = retry_at.replace(tzinfo=UTC)
-    return max(0.0, (retry_at.astimezone(UTC) - datetime.now(UTC)).total_seconds())

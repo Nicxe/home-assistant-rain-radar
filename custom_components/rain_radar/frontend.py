@@ -51,7 +51,7 @@ def _read_manifest_version() -> str:
     manifest_path = Path(__file__).resolve().parent / "manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return "0.0.0"
     return str(manifest.get("version", "0.0.0"))
 

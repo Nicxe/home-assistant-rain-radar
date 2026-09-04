@@ -345,7 +345,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 def _as_float(value: Any) -> float | None:
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

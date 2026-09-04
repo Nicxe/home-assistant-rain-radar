@@ -47,11 +47,11 @@ class RainRadarSensorDescription(SensorEntityDescription):
 
 
 def _data_age_minutes(data: RainRadarData) -> int | None:
+    """Return the age of the newest actual source data, excluding local refreshes."""
     timestamps = [
         data.precipitation.updated_at,
         data.rain_risk.updated_at,
         data.radar_frames.latest_time,
-        data.updated_at,
     ]
     latest = max((value for value in timestamps if value is not None), default=None)
     if latest is None:
@@ -68,7 +68,7 @@ def _rain_risk_attrs(data: RainRadarData) -> dict[str, Any]:
                 "precipitation_amount": hour.precipitation_amount,
                 "symbol_code": hour.symbol_code,
             }
-            for hour in data.rain_risk.hourly[: data.options.rain_risk_horizon_hours]
+            for hour in data.rain_risk.hourly
         },
         ATTR_IS_STALE: data.rain_risk.is_stale,
         ATTR_LAST_UPDATED: data.rain_risk.updated_at.isoformat()
@@ -204,7 +204,7 @@ class RainRadarSensor(RainRadarEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.data is not None
+        return super().available and self.coordinator.data is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
