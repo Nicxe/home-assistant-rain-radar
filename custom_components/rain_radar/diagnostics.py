@@ -82,6 +82,12 @@ async def async_get_config_entry_diagnostics(
                 else None,
                 "last_error": coordinator.last_error_type if coordinator else None,
                 "forecast_request": forecast_request,
+                "radar_status": coordinator_data.radar_status.as_dict()
+                if coordinator_data
+                else None,
+                "forecast_status": coordinator_data.forecast_status.as_dict()
+                if coordinator_data
+                else None,
             },
             "data": {
                 "last_update_success": coordinator.last_update_success

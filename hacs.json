@@ -1,7 +1,12 @@
 {
   "name": "Rain Radar",
-  "country": ["SE", "NO", "DK", "FI"],
+  "country": [
+    "SE",
+    "NO",
+    "DK",
+    "FI"
+  ],
   "zip_release": true,
-  "filename": "rain_radar.zip"
+  "filename": "rain_radar.zip",
+  "homeassistant": "2026.3.0"
 }
-

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import math
 from typing import Any
 
 from homeassistant.util import dt as dt_util
@@ -28,6 +29,11 @@ from .models import (
     RainRiskForecast,
     RainRiskHour,
 )
+from .quality import precipitation_forecast, rain_risk_forecast
+
+# SNOW1gv1 parameter.json declares missingValue=9999 for every requested field.
+# https://opendata.smhi.se/metfcst/snow1gv1/examples
+_MISSING_VALUE = 9999
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +52,7 @@ class _SmhiSample:
     time: datetime
     interval_start: datetime | None
     precipitation_rate: float | None
-    probability: int
+    probability: int | None
     symbol_code: str | None
 
 
@@ -59,6 +65,7 @@ class SmhiProvider:
         self._coverage_status = CoverageStatus.UNKNOWN
         self._forecast_lock = asyncio.Lock()
         self._forecast_cache: _SmhiForecastCache | None = None
+        self._forecast_error: tuple[str, datetime, RainRadarApiError] | None = None
 
     @property
     def provider_id(self) -> str:
@@ -98,38 +105,24 @@ class SmhiProvider:
         updated_at = _parse_datetime(payload.get("createdTime")) or _parse_datetime(
             payload.get("referenceTime")
         )
-        current = _current_precipitation(samples)
-        rain_now = (
-            current is not None and current >= options.rain_threshold
-            if samples
-            else None
-        )
-        rain_arrival = (
-            0 if rain_now is True else _arrival_minutes(samples, options.rain_threshold)
-        )
-        rain_soon = (
-            rain_arrival is not None
-            and rain_arrival <= options.rain_soon_window_minutes
-        )
-        latest_time = max((sample.time for sample in samples), default=updated_at)
-
-        return PrecipitationForecast(
-            samples=[
+        return precipitation_forecast(
+            [
                 PrecipitationSample(
                     time=sample.time,
                     precipitation_rate=sample.precipitation_rate,
+                    interval_start=sample.interval_start,
+                    interval_end=sample.time,
                 )
                 for sample in samples
             ],
-            current_precipitation=current,
-            rain_now=rain_now,
-            rain_soon=rain_soon,
-            rain_arrival_minutes=rain_arrival,
-            updated_at=updated_at,
-            latest_time=latest_time,
-            coverage_status=self._coverage_status,
-            is_stale=_is_stale(cache.expires_at),
-            cache=cache,
+            options,
+            cache,
+            updated_at,
+            self._coverage_status,
+            data_kind="model",
+            resolution_minutes=60,
+            maximum_age=timedelta(hours=12),
+            source_reference=_parse_datetime(payload.get("referenceTime")),
         )
 
     async def async_get_rain_risk(
@@ -148,14 +141,13 @@ class SmhiProvider:
             payload.get("referenceTime")
         )
         hourly = _rain_risk_hours(samples, options.rain_risk_horizon_hours)
-        max_probability = max((hour.probability for hour in hourly), default=None)
-
-        return RainRiskForecast(
-            max_probability=max_probability,
-            hourly=hourly,
-            updated_at=updated_at,
-            is_stale=_is_stale(cache.expires_at),
-            cache=cache,
+        return rain_risk_forecast(
+            hourly,
+            options.rain_risk_horizon_hours,
+            cache,
+            updated_at,
+            latest_time=max((sample.time for sample in samples), default=None),
+            source_reference=_parse_datetime(payload.get("referenceTime")),
         )
 
     async def async_get_radar_frames(
@@ -183,6 +175,12 @@ class SmhiProvider:
             if cached := self._fresh_cache(cache_key):
                 return cached.payload, cached.cache
 
+            if self._forecast_error is not None:
+                failed_key, retry_at, error = self._forecast_error
+                if failed_key == cache_key and datetime.now(UTC) < retry_at:
+                    if _is_outside_coverage_error(error):
+                        return None, CacheMetadata()
+                    raise error
             try:
                 payload, cache = await self.client.async_get_json(
                     cache_key,
@@ -196,11 +194,18 @@ class SmhiProvider:
                     },
                 )
             except RainRadarApiError as err:
+                self._forecast_error = (
+                    cache_key,
+                    err.next_retry or datetime.now(UTC) + timedelta(minutes=1),
+                    err,
+                )
                 if _is_outside_coverage_error(err):
                     self._coverage_status = CoverageStatus.OUTSIDE_COVERAGE
                     return None, CacheMetadata()
+                self._coverage_status = CoverageStatus.TEMPORARILY_UNAVAILABLE
                 raise
 
+            self._forecast_error = None
             if not isinstance(payload, dict):
                 self._coverage_status = CoverageStatus.UNKNOWN
                 return None, cache
@@ -275,60 +280,19 @@ def _rain_risk_hours(
     for sample in samples:
         if sample.time <= now:
             continue
-        if sample.time > end:
-            break
+        if sample.interval_start is None or sample.interval_start >= end:
+            continue
         hourly.append(
             RainRiskHour(
                 time=sample.time,
+                interval_start=sample.interval_start,
+                interval_end=sample.time,
                 probability=sample.probability,
                 precipitation_amount=sample.precipitation_rate,
                 symbol_code=sample.symbol_code,
             )
         )
-        if len(hourly) >= horizon_hours:
-            break
     return hourly
-
-
-def _current_precipitation(samples: list[_SmhiSample]) -> float | None:
-    if not samples:
-        return None
-    now = datetime.now(UTC)
-    for sample in samples:
-        if _sample_contains_time(sample, now):
-            return sample.precipitation_rate
-    past_or_current = [sample for sample in samples if sample.time <= now]
-    current = past_or_current[-1] if past_or_current else samples[0]
-    return current.precipitation_rate
-
-
-def _arrival_minutes(
-    samples: list[_SmhiSample],
-    rain_threshold: float,
-) -> int | None:
-    now = datetime.now(UTC)
-    for sample in samples:
-        if (
-            sample.precipitation_rate is None
-            or sample.precipitation_rate < rain_threshold
-        ):
-            continue
-        if _sample_contains_time(sample, now):
-            return 0
-        arrival_time = (
-            sample.interval_start if sample.interval_start is not None else sample.time
-        )
-        if arrival_time < now:
-            continue
-        return max(0, round((arrival_time - now).total_seconds() / 60))
-    return None
-
-
-def _sample_contains_time(sample: _SmhiSample, value: datetime) -> bool:
-    return (
-        sample.interval_start is not None
-        and sample.interval_start <= value <= sample.time
-    )
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -344,27 +308,42 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 def _as_float(value: Any) -> float | None:
     try:
-        return float(value)
+        numeric = float(value)
+        return (
+            numeric
+            if math.isfinite(numeric) and numeric >= 0 and numeric != _MISSING_VALUE
+            else None
+        )
     except TypeError, ValueError:
         return None
 
 
-def _clamp_probability(value: Any) -> int:
+def _clamp_probability(value: Any) -> int | None:
     numeric = _as_float(value)
     if numeric is None:
-        return 0
+        return None
     return round(max(0.0, min(100.0, numeric)))
 
 
 def _symbol_code(value: Any) -> str | None:
-    if value is None:
+    if _as_float(value) is None:
         return None
     return str(value)
 
 
 def _is_outside_coverage_error(err: RainRadarApiError) -> bool:
-    message = str(err)
-    return "HTTP 400" in message or "HTTP 404" in message
+    if err.reason == "outside_coverage":
+        return True
+    message = str(err).lower()
+    return ("http 400" in message or "http 404" in message) and any(
+        reason in message
+        for reason in (
+            "outside coverage",
+            "outside the geographical",
+            "outside the domain",
+            "out of bounds",
+        )
+    )
 
 
 def _cache_is_fresh(cache: CacheMetadata) -> bool:
@@ -374,7 +353,3 @@ def _cache_is_fresh(cache: CacheMetadata) -> bool:
     if cache.fetched_at is not None:
         return now - cache.fetched_at < timedelta(minutes=1)
     return False
-
-
-def _is_stale(expires_at: datetime | None) -> bool:
-    return expires_at is not None and expires_at < datetime.now(UTC)

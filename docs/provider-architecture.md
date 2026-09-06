@@ -16,7 +16,7 @@ Radar frame metadata is fetched through Regnradar. The configured radar source s
 - `sweden`: SMHI radar frames through Regnradar.
 - `denmark`: DMI radar frames through Regnradar.
 
-Forecast providers are separate from radar imagery. MET Norway and SMHI are implemented forecast providers for rain-now, rain-soon, rain-arrival, and rain-risk calculations. DMI remains future work for Denmark-specific forecast data.
+Forecast providers are separate from radar imagery. MET Norway, SMHI and DMI are implemented forecast providers. DMI uses HARMONIE DINI precipitation intervals; its rain-risk value indicates whether the selected intensity threshold is reached, rather than a meteorological probability. See [DMI provider](dmi-future-provider.md).
 
 Provider implementations must:
 
@@ -25,4 +25,12 @@ Provider implementations must:
 - Respect cache headers and conditional requests where supported.
 - Return clear coverage and stale-data states.
 - Avoid exposing raw provider payloads in entity attributes or diagnostics.
-- Avoid unauthenticated endpoints.
+- Use documented public endpoints; keyless DMI responses must not trigger credential reauthentication.
+
+## Source quality and delivery
+
+Precipitation samples and probability periods preserve interval boundaries, source timestamps, data kind, resolution, window completeness and reason codes. MET and SMHI share interval validity rules. Missing values remain unknown; a negative rain answer requires complete coverage of the requested window. Weather-data validity is checked independently of HTTP cache expiry.
+
+Radar and forecast delivery have separate status objects. Each exposes status, reason, last successful response, last attempt, next retry and source-data age. Healthy radar can initialize and continue while forecasts fail. Radar health considers frame count and frame age independently of geographic coverage.
+
+The HTTP client reuses fresh responses, coalesces concurrent identical requests, and shares failures during backoff. Regnradar area metadata is shared between configured locations. Timestamped images are cached as immutable within bounded caches. DMI retains its model-cycle-aware request manager and Retry-After handling.

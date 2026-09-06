@@ -7,10 +7,11 @@ Local validation:
 ```bash
 ./scripts/run_ruff.sh
 ./scripts/run_tests.sh
-node --experimental-default-type=module --check custom_components/rain_radar/www/rain-radar-card.js
+node --check custom_components/rain_radar/www/rain-radar-card.js
+node --test custom_components/rain_radar/tests/frontend/*.test.cjs
 ```
 
-Install into the local Home Assistant dev config:
+For repository-only development, install into a Home Assistant dev config:
 
 ```bash
 ./scripts/sync-to-ha-dev.sh
@@ -22,3 +23,7 @@ The card source of truth is `custom_components/rain_radar/www/rain-radar-card.js
 
 Do not edit Home Assistant `.storage` files directly.
 
+
+For the local development workflow used here, author changes in `/Volumes/config/custom_components/rain_radar`, synchronize the bundled card immediately to `/Volumes/config/www/rain-radar-card.js`, and then copy the validated integration tree to this repository. Inspect initial differences before copying. Do not run the repository-to-HA script over newer development work.
+
+The declared minimum is Home Assistant 2026.3.0, the first release using Python 3.14. Verify against that version in an isolated environment as well as the running development instance when changing compatibility requirements. The system Python test installation may contain an older Home Assistant version and alone does not verify this minimum.

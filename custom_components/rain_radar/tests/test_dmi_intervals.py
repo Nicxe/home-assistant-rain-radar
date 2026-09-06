@@ -215,3 +215,34 @@ async def test_risk_includes_partial_interval_at_end_of_horizon() -> None:
 
     assert risk.max_probability == 100
     assert len(risk.hourly) == 3
+
+
+async def test_normalized_metadata_preserves_actual_model_intervals() -> None:
+    """Expose real three-hour intervals without implying hourly precision."""
+    provider = _provider(_payload([(0, 0), (3, 0.15)]), 0.5)
+    forecast = await provider.async_get_precipitation_forecast(_LOCATION, _OPTIONS)
+    risk = await provider.async_get_rain_risk(_LOCATION, _OPTIONS)
+
+    assert forecast.data_kind == "model"
+    assert forecast.resolution_minutes == 180
+    assert forecast.window_complete is True
+    assert forecast.observation_time is None
+    assert forecast.samples[0].interval_start == _START
+    assert forecast.samples[0].interval_end == _START + timedelta(hours=3)
+    assert risk.data_kind == "model"
+    assert risk.resolution_minutes == 180
+    assert risk.window_complete is True
+    assert risk.hourly[0].interval_start == _START
+    assert risk.hourly[0].interval_end == _START + timedelta(hours=3)
+
+
+async def test_normalized_metadata_exposes_missing_dmi_window() -> None:
+    """Unknown DMI gaps remain visible in the shared quality metadata."""
+    provider = _provider(_payload([(0, 0), (1, None), (2, 0.4), (3, 0.4)]), 0.5)
+    forecast = await provider.async_get_precipitation_forecast(_LOCATION, _OPTIONS)
+    risk = await provider.async_get_rain_risk(_LOCATION, _OPTIONS)
+
+    assert forecast.window_complete is False
+    assert forecast.reason == "incomplete_window"
+    assert risk.window_complete is False
+    assert risk.reason == "incomplete_window"

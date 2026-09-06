@@ -438,3 +438,99 @@ def test_api_error_constructors_remain_backward_compatible() -> None:
     assert error.status_code is None
     assert temporary.retry_after == 30
     assert rate_limited.retry_after == 60
+
+
+@pytest.mark.parametrize("method", ["async_get_json", "async_get_bytes"])
+async def test_fresh_http_cache_avoids_network(hass, monkeypatch, method):
+    """Do not contact providers before advertised expiry."""
+    payload = {"value": 1} if method == "async_get_json" else b"image"
+    session = _SequenceSession(
+        _Response(200, payload=payload, headers={"Cache-Control": "max-age=3600"})
+    )
+    monkeypatch.setattr(
+        api_module.aiohttp_client, "async_get_clientsession", lambda hass: session
+    )
+    client = RainRadarApiClient(hass, DEFAULT_CONTACT)
+    first = await getattr(client, method)("cache", "https://example.com/data")
+    second = await getattr(client, method)("cache", "https://example.com/data")
+    assert first[0] == second[0]
+    assert second[1].from_cache
+    assert len(session.request_headers) == 1
+
+
+async def test_concurrent_failures_share_request_and_backoff(hass, monkeypatch):
+    """Parallel and subsequent consumers respect the same failure retry time."""
+    import asyncio
+
+    session = _SequenceSession(_Response(503, headers={"Retry-After": "600"}))
+    monkeypatch.setattr(
+        api_module.aiohttp_client, "async_get_clientsession", lambda hass: session
+    )
+    client = RainRadarApiClient(hass, DEFAULT_CONTACT)
+    results = await asyncio.gather(
+        *(client.async_get_json("cache", "https://example.com/data") for _ in range(3)),
+        return_exceptions=True,
+    )
+    assert all(isinstance(result, RainRadarApiTemporaryError) for result in results)
+    with pytest.raises(RainRadarApiTemporaryError):
+        await client.async_get_json("cache", "https://example.com/data")
+    assert len(session.request_headers) == 1
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Cache-Control": "no-cache, max-age=3600"},
+        {"Cache-Control": "max-age=60", "Age": "120"},
+    ],
+)
+async def test_expired_or_revalidation_required_cache_calls_provider(
+    hass, monkeypatch, headers
+):
+    """Respect intermediaries' Age and mandatory revalidation."""
+    session = _SequenceSession(
+        _Response(200, payload={"value": 1}, headers=headers),
+        _Response(200, payload={"value": 2}),
+    )
+    monkeypatch.setattr(
+        api_module.aiohttp_client, "async_get_clientsession", lambda hass: session
+    )
+    client = RainRadarApiClient(hass, DEFAULT_CONTACT)
+    await client.async_get_json("cache", "https://example.com/data")
+    result = await client.async_get_json("cache", "https://example.com/data")
+    assert result[0] == {"value": 2}
+    assert len(session.request_headers) == 2
+
+
+async def test_concurrent_successes_without_expiry_share_request(hass, monkeypatch):
+    """Concurrent consumers of an uncacheable result still use one request."""
+    import asyncio
+
+    session = _SequenceSession(_Response(200, payload={"value": 1}))
+    monkeypatch.setattr(
+        api_module.aiohttp_client, "async_get_clientsession", lambda hass: session
+    )
+    client = RainRadarApiClient(hass, DEFAULT_CONTACT)
+    results = await asyncio.gather(
+        *(client.async_get_json("cache", "https://example.com/data") for _ in range(3))
+    )
+    assert all(result[0] == {"value": 1} for result in results)
+    assert len(session.request_headers) == 1
+
+
+async def test_no_store_does_not_retain_payload_or_validators(hass, monkeypatch):
+    """A provider's no-store response is not retained after the request."""
+    session = _SequenceSession(
+        _Response(
+            200,
+            payload={"value": 1},
+            headers={"Cache-Control": "no-store", "ETag": "secret"},
+        )
+    )
+    monkeypatch.setattr(
+        api_module.aiohttp_client, "async_get_clientsession", lambda hass: session
+    )
+    client = RainRadarApiClient(hass, DEFAULT_CONTACT)
+    await client.async_get_json("cache", "https://example.com/data")
+    assert "cache" not in client._cache
+    assert "If-None-Match" not in client._headers("cache")

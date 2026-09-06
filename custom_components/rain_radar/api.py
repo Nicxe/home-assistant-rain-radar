@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 import json
 import logging
 import math
+import random
 from typing import Any
 
 from aiohttp import ClientError, ClientResponse, ContentTypeError
@@ -37,6 +39,8 @@ class RainRadarApiError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.reason = reason
+        self.next_retry: datetime | None = None
+        self.last_attempt: datetime | None = None
 
 
 class RainRadarApiAuthError(RainRadarApiError):
@@ -80,6 +84,12 @@ class RainRadarApiClient:
         self.hass = hass
         self._contact = contact.strip()
         self._cache: OrderedDict[str, _CachedResponse] = OrderedDict()
+        self._inflight: dict[str, asyncio.Task] = {}
+        self._failures: OrderedDict[str, tuple[datetime, RainRadarApiError, int]] = (
+            OrderedDict()
+        )
+        self.last_attempt: datetime | None = None
+        self.last_success: datetime | None = None
 
     @property
     def contact(self) -> str:
@@ -110,7 +120,69 @@ class RainRadarApiClient:
                 headers["If-Modified-Since"] = cached.metadata.last_modified
         return headers
 
-    async def async_get_json(
+    async def _async_request(
+        self, cache_key: str, fetch: Callable[[], Coroutine]
+    ) -> tuple:
+        """Reuse fresh data, one in-flight request, and bounded failure backoff."""
+        now = datetime.now(UTC)
+        cached = self._cache.get(cache_key)
+        if cached and cached.metadata.expires_at and cached.metadata.expires_at > now:
+            self._cache.move_to_end(cache_key)
+            metadata = replace(cached.metadata, from_cache=True)
+            if isinstance(cached.payload, bytes):
+                return (
+                    cached.payload,
+                    metadata,
+                    cached.content_type or "application/octet-stream",
+                )
+            return cached.payload, metadata
+        if (task := self._inflight.get(cache_key)) and not task.done():
+            return await asyncio.shield(task)
+        failure = self._failures.get(cache_key)
+        if failure and failure[0] > now:
+            raise failure[1]
+
+        async def run() -> tuple:
+            self.last_attempt = datetime.now(UTC)
+            try:
+                result = await fetch()
+            except RainRadarApiError as err:
+                err.last_attempt = self.last_attempt
+                count = failure[2] + 1 if failure else 1
+                delay = min(900, 30 * 2 ** min(count - 1, 5)) * random.uniform(1, 1.2)
+                delay = max(delay, getattr(err, "retry_after", None) or 0)
+                err.next_retry = datetime.now(UTC) + timedelta(seconds=delay)
+                self._failures[cache_key] = (err.next_retry, err, count)
+                self._failures.move_to_end(cache_key)
+                while len(self._failures) > _MAX_CACHE_ENTRIES:
+                    self._failures.popitem(last=False)
+                raise
+            else:
+                self._failures.pop(cache_key, None)
+                self.last_success = datetime.now(UTC)
+                return result
+            finally:
+                self._inflight.pop(cache_key, None)
+
+        task = self.hass.async_create_background_task(
+            run(), "Rain Radar HTTP request", eager_start=False
+        )
+        self._inflight[cache_key] = task
+        return await asyncio.shield(task)
+
+    async def async_get_json(self, cache_key: str, url: str, **kwargs) -> tuple:
+        """Fetch JSON respecting freshness, concurrent consumers, and retry delays."""
+        return await self._async_request(
+            cache_key, lambda: self._async_fetch_json(cache_key, url, **kwargs)
+        )
+
+    async def async_get_bytes(self, cache_key: str, url: str, **kwargs) -> tuple:
+        """Fetch an image once while its HTTP cache remains fresh."""
+        return await self._async_request(
+            cache_key, lambda: self._async_fetch_bytes(cache_key, url, **kwargs)
+        )
+
+    async def _async_fetch_json(
         self,
         cache_key: str,
         url: str,
@@ -118,6 +190,7 @@ class RainRadarApiClient:
         params: dict[str, Any] | None = None,
         request_timeout: int = 15,
         auth_required: bool = True,
+        default_cache_ttl: int = 0,
     ) -> tuple[dict[str, Any] | list[Any], CacheMetadata]:
         """Fetch JSON and reuse cached payload on 304 responses."""
         session = aiohttp_client.async_get_clientsession(self.hass)
@@ -161,6 +234,12 @@ class RainRadarApiClient:
                             ),
                         ) from err
                     metadata = _cache_metadata_from_response(response)
+                    if metadata.expires_at is None and default_cache_ttl:
+                        metadata = replace(
+                            metadata,
+                            expires_at=metadata.fetched_at
+                            + timedelta(seconds=default_cache_ttl),
+                        )
         except TimeoutError as err:
             raise RainRadarApiTemporaryError(
                 f"Timed out fetching {url}", reason="timeout"
@@ -173,7 +252,7 @@ class RainRadarApiClient:
         self._store_cache(cache_key, _CachedResponse(payload, metadata))
         return payload, metadata
 
-    async def async_get_bytes(
+    async def _async_fetch_bytes(
         self,
         cache_key: str,
         url: str,
@@ -181,6 +260,7 @@ class RainRadarApiClient:
         params: dict[str, Any] | None = None,
         request_timeout: int = 15,
         accept: str = "image/png",
+        immutable: bool = False,
     ) -> tuple[bytes, CacheMetadata, str]:
         """Fetch bytes and reuse cached payload on 304 responses."""
         session = aiohttp_client.async_get_clientsession(self.hass)
@@ -219,6 +299,10 @@ class RainRadarApiClient:
                     await self._raise_for_status(response, url)
                     payload = await response.read()
                     metadata = _cache_metadata_from_response(response)
+                    if immutable and metadata.expires_at is None:
+                        metadata = replace(
+                            metadata, expires_at=metadata.fetched_at + timedelta(days=1)
+                        )
                     content_type = response.headers.get(
                         "Content-Type", "application/octet-stream"
                     ).split(";", 1)[0]
@@ -236,6 +320,9 @@ class RainRadarApiClient:
 
     def _store_cache(self, cache_key: str, cached: _CachedResponse) -> None:
         """Store a bounded response cache entry."""
+        if cached.metadata.no_store:
+            self._cache.pop(cache_key, None)
+            return
         self._cache[cache_key] = cached
         self._cache.move_to_end(cache_key)
         while len(self._cache) > _MAX_CACHE_ENTRIES:
@@ -326,7 +413,14 @@ def _cache_metadata_from_response(response: ClientResponse) -> CacheMetadata:
     expires_at = _parse_expires(response.headers.get("Expires"))
     max_age = _parse_cache_control_max_age(response.headers.get("Cache-Control"))
     if max_age is not None:
-        expires_at = now + timedelta(seconds=max_age)
+        try:
+            age = max(0, int(response.headers.get("Age", "0")))
+        except ValueError:
+            age = 0
+        expires_at = now + timedelta(seconds=max(0, max_age - age))
+    directives = (response.headers.get("Cache-Control") or "").lower()
+    if "no-cache" in directives or "no-store" in directives:
+        expires_at = now
 
     return CacheMetadata(
         fetched_at=now,
@@ -334,6 +428,7 @@ def _cache_metadata_from_response(response: ClientResponse) -> CacheMetadata:
         etag=response.headers.get("ETag"),
         last_modified=response.headers.get("Last-Modified"),
         from_cache=False,
+        no_store="no-store" in directives,
     )
 
 
@@ -357,6 +452,7 @@ def _validated_cache_metadata(
         etag=metadata.etag or cached.etag,
         last_modified=metadata.last_modified or cached.last_modified,
         from_cache=True,
+        no_store=metadata.no_store or cached.no_store,
     )
 
 

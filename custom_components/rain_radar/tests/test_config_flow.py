@@ -39,7 +39,6 @@ VALID_INPUT = {
     CONF_RADAR_AREA: DEFAULT_RADAR_AREA,
     CONF_RAIN_THRESHOLD: 0.1,
     CONF_RAIN_SOON_WINDOW: 60,
-    CONF_SAMPLE_RADIUS_M: 1000,
     CONF_RAIN_RISK_HORIZON_HOURS: 12,
 }
 
@@ -230,3 +229,89 @@ async def test_migrate_entry_splits_legacy_provider(
     assert entry.options[CONF_RADAR_PROVIDER] == DEFAULT_RADAR_PROVIDER
     assert entry.options[CONF_FORECAST_PROVIDER] == DEFAULT_FORECAST_PROVIDER
     assert entry.options[CONF_RADAR_AREA] == "denmark"
+
+
+async def test_sampling_radius_hidden_and_defaulted(hass: HomeAssistant) -> None:
+    """Unused sampling must not be required from users."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert CONF_SAMPLE_RADIUS_M not in _schema_keys(result)
+    values = {
+        key: value for key, value in VALID_INPUT.items() if key != CONF_SAMPLE_RADIUS_M
+    }
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], values)
+    assert result["step_id"] == "reload_notice"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["data"][CONF_SAMPLE_RADIUS_M] == 1000
+
+
+async def test_options_reject_effective_duplicate(
+    hass: HomeAssistant, rain_radar_config_entry
+) -> None:
+    """Compare against current options even when stored identity is old."""
+    rain_radar_config_entry.add_to_hass(hass)
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        title="Other",
+        data={**VALID_INPUT, CONF_LATITUDE: 61},
+        options={**VALID_INPUT, CONF_FORECAST_PROVIDER: PROVIDER_DMI},
+        unique_id="old_identity",
+        version=2,
+    )
+    other.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(
+        rain_radar_config_entry.entry_id
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**VALID_INPUT, CONF_FORECAST_PROVIDER: PROVIDER_DMI}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "already_configured"}
+    assert rain_radar_config_entry.options == {}
+
+
+async def test_setup_rejects_duplicate_using_current_options(
+    hass: HomeAssistant,
+) -> None:
+    """Legacy unique IDs must not let a duplicate current location through."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Moved",
+        data={**VALID_INPUT, CONF_LATITUDE: 61},
+        options=VALID_INPUT,
+        unique_id="old_identity",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], VALID_INPUT
+    )
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_options_rename_keeps_ids_and_radius(
+    hass: HomeAssistant, rain_radar_config_entry
+) -> None:
+    """Rename updates display title without replacing the entry identity."""
+    rain_radar_config_entry.add_to_hass(hass)
+    original_id = rain_radar_config_entry.entry_id
+    values = {
+        key: value for key, value in VALID_INPUT.items() if key != CONF_SAMPLE_RADIUS_M
+    }
+    values.update({CONF_NAME: "Garden", CONF_LATITUDE: 60})
+    result = await hass.config_entries.options.async_init(original_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], values
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert rain_radar_config_entry.entry_id == original_id
+    assert rain_radar_config_entry.title == "Garden"
+    assert (
+        rain_radar_config_entry.unique_id == f"{DEFAULT_FORECAST_PROVIDER}:60.0,18.0686"
+    )
+    assert rain_radar_config_entry.options[CONF_SAMPLE_RADIUS_M] == 1000

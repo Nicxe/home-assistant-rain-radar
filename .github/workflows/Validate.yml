@@ -31,5 +31,7 @@ jobs:
         with:
           node-version: "22"
       - name: Check card syntax
-        run: node --experimental-default-type=module --check custom_components/rain_radar/www/rain-radar-card.js
+        run: node --check custom_components/rain_radar/www/rain-radar-card.js
 
+      - name: Test card behavior
+        run: node --test custom_components/rain_radar/tests/frontend/*.test.cjs

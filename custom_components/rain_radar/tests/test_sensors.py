@@ -158,7 +158,7 @@ async def test_radar_coverage_uses_radar_frame_status(
     await hass.config_entries.async_setup(rain_radar_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    assert hass.states.get("binary_sensor.home_radar_coverage").state == "off"
+    assert hass.states.get("binary_sensor.home_radar_coverage").state == "unavailable"
     assert hass.states.get("sensor.home_provider").attributes["coverage_status"] == "ok"
     assert (
         hass.states.get("sensor.home_provider").attributes["radar_coverage_status"]
@@ -290,7 +290,17 @@ async def test_partial_forecast_outage_keeps_radar_available(
     mocked_provider_updates,
 ) -> None:
     """A forecast backoff must not hide independently available radar data."""
-    precipitation, rain_risk, _ = mocked_provider_updates
+    precipitation, rain_risk, frames = mocked_provider_updates
+    now = datetime.now(UTC)
+    frames.return_value = RadarFrameSet(
+        frames=[
+            RadarFrame(
+                "fresh", now, "https://api.regnradar.se/radar/file/fresh.png", "fresh"
+            )
+        ],
+        latest_time=now,
+        coverage_status=CoverageStatus.OK,
+    )
     precipitation.return_value = PrecipitationForecast(
         coverage_status=CoverageStatus.TEMPORARILY_UNAVAILABLE
     )
@@ -300,8 +310,8 @@ async def test_partial_forecast_outage_keeps_radar_available(
     await hass.async_block_till_done()
 
     assert rain_radar_config_entry.runtime_data.coordinator.last_update_success
-    assert hass.states.get("sensor.home_precipitation_now").state == "unknown"
-    assert hass.states.get("binary_sensor.home_raining_now").state == "unknown"
+    assert hass.states.get("sensor.home_precipitation_now").state == "unavailable"
+    assert hass.states.get("binary_sensor.home_raining_now").state == "unavailable"
     assert hass.states.get("binary_sensor.home_radar_coverage").state == "on"
     assert hass.states.get("sensor.home_latest_radar_time").state != "unavailable"
     assert hass.states.get("sensor.home_provider").attributes["status"] == "degraded"
@@ -340,3 +350,166 @@ async def test_data_age_uses_source_timestamps_not_coordinator_tick(
     await hass.async_block_till_done()
 
     assert hass.states.get("sensor.home_data_age").state == expected_age
+
+
+async def test_forecast_failure_and_recovery_preserve_radar_and_source_times(
+    hass, rain_radar_config_entry, mocked_provider_updates
+):
+    """An outage affects only its source and recovery clears its failure metadata."""
+    precipitation, rain_risk, frames = mocked_provider_updates
+    now = datetime.now(UTC)
+    frames.return_value = RadarFrameSet(
+        frames=[
+            RadarFrame(
+                "fresh", now, "https://api.regnradar.se/radar/file/fresh.png", "fresh"
+            )
+        ],
+        latest_time=now,
+        coverage_status=CoverageStatus.OK,
+    )
+    rain_radar_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(rain_radar_config_entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = rain_radar_config_entry.runtime_data.coordinator
+    last_success = coordinator.data.forecast_status.last_success
+    precipitation.side_effect = RainRadarApiTemporaryError(
+        "Forecast down", reason="server_error"
+    )
+    rain_risk.side_effect = RainRadarApiTemporaryError(
+        "Forecast down", reason="server_error"
+    )
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert coordinator.last_update_success
+    assert hass.states.get("sensor.home_precipitation_now").state == "unavailable"
+    assert hass.states.get("binary_sensor.home_radar_coverage").state == "on"
+    assert coordinator.data.forecast_status.last_success == last_success
+    assert coordinator.data.forecast_status.reason == "server_error"
+    precipitation.side_effect = None
+    rain_risk.side_effect = None
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.home_precipitation_now").state == "0.2"
+    assert coordinator.data.forecast_status.reason is None
+    assert coordinator.data.forecast_status.status == "ok"
+    assert (
+        hass.states.get("binary_sensor.home_radar_coverage").attributes["is_stale"]
+        is False
+    )
+
+
+async def test_setup_with_failed_met_forecast_and_fresh_radar(
+    hass, rain_radar_config_entry, mocked_provider_updates
+):
+    """First refresh loads a MET location even when only radar is delivered."""
+    precipitation, rain_risk, frames = mocked_provider_updates
+    now = datetime.now(UTC)
+    frames.return_value = RadarFrameSet(
+        frames=[
+            RadarFrame(
+                "fresh", now, "https://api.regnradar.se/radar/file/fresh.png", "fresh"
+            )
+        ],
+        latest_time=now,
+        coverage_status=CoverageStatus.OK,
+    )
+    precipitation.side_effect = RainRadarApiTemporaryError(
+        "Forecast down", reason="server_error"
+    )
+    rain_risk.side_effect = RainRadarApiTemporaryError(
+        "Forecast down", reason="server_error"
+    )
+    rain_radar_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(rain_radar_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.home_radar_coverage").state == "on"
+    assert hass.states.get("sensor.home_precipitation_now").state == "unavailable"
+    assert (
+        hass.states.get("sensor.home_provider").attributes["forecast_status"]["reason"]
+        == "server_error"
+    )
+
+
+@pytest.mark.parametrize(("radar_age", "expected_age"), [(30, "30"), (None, "unknown")])
+async def test_dmi_fetch_time_does_not_override_real_radar_data_age(
+    hass,
+    rain_radar_config_entry,
+    mocked_provider_updates,
+    monkeypatch,
+    radar_age,
+    expected_age,
+):
+    """A freshly fetched DMI forecast cannot make existing radar data look new."""
+    now = datetime.now(UTC)
+    precipitation, rain_risk, frames = mocked_provider_updates
+    precipitation.return_value = PrecipitationForecast(updated_at=now)
+    rain_risk.return_value = RainRiskForecast(max_probability=None, updated_at=now)
+    frames.return_value = RadarFrameSet(
+        latest_time=now - timedelta(minutes=radar_age)
+        if radar_age is not None
+        else None
+    )
+    monkeypatch.setattr(
+        "custom_components.rain_radar.providers.dmi.DmiProvider.async_get_precipitation_forecast",
+        precipitation,
+    )
+    monkeypatch.setattr(
+        "custom_components.rain_radar.providers.dmi.DmiProvider.async_get_rain_risk",
+        rain_risk,
+    )
+    rain_radar_config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        rain_radar_config_entry, options={"forecast_provider": "dmi"}
+    )
+    assert await hass.config_entries.async_setup(rain_radar_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.home_data_age").state == expected_age
+    assert (
+        rain_radar_config_entry.runtime_data.coordinator.data.forecast_status.data_age_seconds
+        is None
+    )
+
+
+async def test_missing_met_probability_stays_unknown_when_nowcast_fails(
+    hass, rain_radar_config_entry, mocked_provider_updates
+):
+    """A successful model with no probabilities is independent of nowcast failure."""
+    precipitation, rain_risk, _frames = mocked_provider_updates
+    precipitation.side_effect = RainRadarApiTemporaryError(
+        "Nowcast down", reason="server_error"
+    )
+    now = datetime.now(UTC)
+    rain_risk.return_value = RainRiskForecast(
+        max_probability=None,
+        hourly=[RainRiskHour(now, None, 0.0, "cloudy")],
+        window_complete=False,
+        reason="incomplete_window",
+    )
+    rain_radar_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(rain_radar_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.home_precipitation_now").state == "unavailable"
+    risk = hass.states.get("sensor.home_rain_risk_12h")
+    assert risk.state == "unknown"
+    assert risk.attributes["hourly"][now.isoformat()]["precipitation_amount"] == 0.0
+
+
+async def test_each_forecast_entity_exposes_its_own_staleness(
+    hass, rain_radar_config_entry, mocked_provider_updates
+):
+    """A stale short forecast must not mark a fresh probability model as stale."""
+    precipitation, rain_risk, _frames = mocked_provider_updates
+    precipitation.return_value = PrecipitationForecast(
+        is_stale=True, reason="stale_data", window_complete=False
+    )
+    rain_risk.return_value = RainRiskForecast(max_probability=49, is_stale=False)
+    rain_radar_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(rain_radar_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    for entity_id in ("sensor.home_rain_arrival", "binary_sensor.home_rain_soon"):
+        attrs = hass.states.get(entity_id).attributes
+        assert attrs["is_stale"] is True
+        assert attrs["reason"] == "stale_data"
+    assert hass.states.get("sensor.home_rain_risk_12h").attributes["is_stale"] is False

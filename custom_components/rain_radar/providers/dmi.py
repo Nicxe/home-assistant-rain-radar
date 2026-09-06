@@ -94,6 +94,10 @@ class _DmiRequestManager:
     def __init__(self) -> None:
         """Initialize shared DMI request state."""
         self.lock = asyncio.Lock()
+        self.inflight: dict[
+            str,
+            asyncio.Task[tuple[dict[str, Any] | None, CacheMetadata, CoverageStatus]],
+        ] = {}
         self._cache: OrderedDict[str, _DmiForecastCache] = OrderedDict()
         self.backoff_until: datetime | None = None
         self.consecutive_failures = 0
@@ -327,6 +331,8 @@ class DmiProvider:
             return PrecipitationForecast(
                 coverage_status=self._coverage_status,
                 cache=cache,
+                data_kind="model",
+                window_complete=False,
             )
 
         samples = _parse_samples(payload)
@@ -352,12 +358,17 @@ class DmiProvider:
         ):
             rain_soon = False
         latest_time = max((sample.end_time for sample in samples), default=None)
+        complete = _covers_period(
+            samples, now, now + timedelta(minutes=options.rain_soon_window_minutes)
+        )
 
         return PrecipitationForecast(
             samples=[
                 PrecipitationSample(
                     time=sample.time,
                     precipitation_rate=sample.precipitation_rate,
+                    interval_start=sample.time,
+                    interval_end=sample.end_time,
                 )
                 for sample in samples
             ],
@@ -370,6 +381,14 @@ class DmiProvider:
             coverage_status=self._coverage_status,
             is_stale=_is_stale(cache, now),
             cache=cache,
+            data_kind="model",
+            resolution_minutes=_resolution_minutes(samples),
+            window_complete=complete,
+            reason="stale_data"
+            if _is_stale(cache, now)
+            else "incomplete_window"
+            if not complete
+            else None,
         )
 
     async def async_get_rain_risk(
@@ -380,7 +399,13 @@ class DmiProvider:
         """Fetch DMI threshold-based rain-risk forecast data."""
         payload, cache = await self._async_get_forecast(location, options)
         if payload is None:
-            return RainRiskForecast(max_probability=None, cache=cache)
+            return RainRiskForecast(
+                max_probability=None,
+                cache=cache,
+                data_kind="model",
+                window_complete=False,
+                coverage_status=self._coverage_status,
+            )
 
         samples = _parse_samples(payload)
         self._coverage_status = CoverageStatus.OK
@@ -397,12 +422,23 @@ class DmiProvider:
         ):
             max_probability = None
 
+        complete = _covers_period(
+            samples, now, now + timedelta(hours=options.rain_risk_horizon_hours)
+        )
         return RainRiskForecast(
             max_probability=max_probability,
             hourly=hourly,
             updated_at=cache.fetched_at,
             is_stale=_is_stale(cache, now),
             cache=cache,
+            data_kind="model",
+            resolution_minutes=_resolution_minutes(samples),
+            window_complete=complete,
+            reason="stale_data"
+            if _is_stale(cache, now)
+            else "incomplete_window"
+            if not complete
+            else None,
         )
 
     async def async_get_radar_frames(
@@ -417,6 +453,47 @@ class DmiProvider:
         )
 
     async def _async_get_forecast(
+        self,
+        location: Location,
+        options: RainRadarOptions,
+    ) -> tuple[dict[str, Any] | None, CacheMetadata]:
+        """Keep shared delivery alive through entry reload or caller cancellation."""
+        request_key = _cache_key(location, options)
+        self._last_request_key = request_key
+        now = self._now()
+        if cached := self._fresh_cache(request_key, now):
+            return self._cached_result(cached, now)
+        if self._request_manager.is_backing_off(now):
+            return self._temporary_result(request_key, now)
+
+        task = self._request_manager.inflight.get(request_key)
+        if task is None:
+
+            async def fetch() -> tuple[
+                dict[str, Any] | None, CacheMetadata, CoverageStatus
+            ]:
+                try:
+                    payload, cache = await self._async_fetch_forecast(location, options)
+                    coverage = (
+                        CoverageStatus.OK
+                        if payload is not None
+                        else self._coverage_status
+                    )
+                    return payload, cache, coverage
+                finally:
+                    self._request_manager.inflight.pop(request_key, None)
+
+            if hass := getattr(self.client, "hass", None):
+                task = hass.async_create_background_task(
+                    fetch(), "Rain Radar shared DMI forecast", eager_start=False
+                )
+            else:
+                task = asyncio.create_task(fetch())
+            self._request_manager.inflight[request_key] = task
+        payload, cache, self._coverage_status = await asyncio.shield(task)
+        return payload, cache
+
+    async def _async_fetch_forecast(
         self,
         location: Location,
         options: RainRadarOptions,
@@ -885,12 +962,25 @@ def _rain_risk_hours(
         hourly.append(
             RainRiskHour(
                 time=sample.time,
+                interval_start=sample.time,
+                interval_end=sample.end_time,
                 probability=_threshold_probability(sample, rain_threshold),
                 precipitation_amount=sample.precipitation_amount,
                 symbol_code=sample.precipitation_type,
             )
         )
     return hourly
+
+
+def _resolution_minutes(samples: list[_DmiSample]) -> int | None:
+    """Report the coarsest returned interval without overstating precision."""
+    return max(
+        (
+            round((sample.end_time - sample.time).total_seconds() / 60)
+            for sample in samples
+        ),
+        default=None,
+    )
 
 
 def _threshold_probability(sample: _DmiSample, rain_threshold: float) -> int:

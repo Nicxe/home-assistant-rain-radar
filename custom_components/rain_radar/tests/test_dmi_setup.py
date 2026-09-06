@@ -164,9 +164,9 @@ async def test_dmi_busy_entry_keeps_radar_and_backoff_across_reload(
     assert retry_at is not None
     assert entry.state is ConfigEntryState.LOADED
     assert first_runtime.coordinator.last_update_success is True
-    assert hass.states.get("sensor.home_precipitation_now").state == "unknown"
-    assert hass.states.get("binary_sensor.home_raining_now").state == "unknown"
-    assert hass.states.get("sensor.home_rain_risk_12h").state == "unknown"
+    assert hass.states.get("sensor.home_precipitation_now").state == "unavailable"
+    assert hass.states.get("binary_sensor.home_raining_now").state == "unavailable"
+    assert hass.states.get("sensor.home_rain_risk_12h").state == "unavailable"
     assert hass.states.get("binary_sensor.home_radar_coverage").state == "on"
     assert hass.states.get("sensor.home_provider").attributes["status"] == "degraded"
 
@@ -193,7 +193,7 @@ async def test_dmi_busy_entry_keeps_radar_and_backoff_across_reload(
     assert diagnostics["provider"]["health"] == "degraded"
     assert diagnostics["provider"]["radar_coverage_status"] == "ok"
     assert diagnostics["data"]["radar_frame_count"] == 2
-    assert hass.states.get("sensor.home_precipitation_now").state == "unknown"
+    assert hass.states.get("sensor.home_precipitation_now").state == "unavailable"
     assert hass.states.get("binary_sensor.home_radar_coverage").state == "on"
     warnings = [
         record

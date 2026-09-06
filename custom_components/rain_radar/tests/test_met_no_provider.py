@@ -122,8 +122,8 @@ async def test_nowcast_returns_zero_arrival_when_already_raining() -> None:
 
 
 @pytest.mark.asyncio
-async def test_nowcast_fixture_handles_no_precipitation() -> None:
-    """Test dry nowcast fixture."""
+async def test_sparse_dry_nowcast_cannot_exclude_rain_in_gaps() -> None:
+    """Sparse dry points cannot describe the complete rain-soon window."""
     provider = MetNoProvider(
         FakeClient(
             {"met_no_nowcast": _shift_nowcast(load_fixture("met_nowcast_dry.json"))}
@@ -136,7 +136,8 @@ async def test_nowcast_fixture_handles_no_precipitation() -> None:
     )
 
     assert forecast.current_precipitation == 0.0
-    assert forecast.rain_soon is False
+    assert forecast.rain_soon is None
+    assert forecast.window_complete is False
     assert forecast.rain_arrival_minutes is None
 
 

@@ -48,6 +48,26 @@ def _round_coord(value: float) -> float:
     return round(float(value), 4)
 
 
+def _location_identity(data: dict[str, Any]) -> str:
+    """Identify the effective forecast provider and rounded point."""
+    return (
+        f"{data.get(CONF_FORECAST_PROVIDER, DEFAULT_FORECAST_PROVIDER)}:"
+        f"{_round_coord(data[CONF_LATITUDE])},{_round_coord(data[CONF_LONGITUDE])}"
+    )
+
+
+def _duplicate_location(
+    hass, data: dict[str, Any], exclude_entry_id: str | None = None
+) -> bool:
+    """Include options when comparing entries created before identity updates."""
+    identity = _location_identity(data)
+    return any(
+        entry.entry_id != exclude_entry_id
+        and _location_identity({**entry.data, **entry.options}) == identity
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    )
+
+
 def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
     errors: dict[str, str] = {}
 
@@ -94,7 +114,9 @@ def _validate_input(user_input: dict[str, Any]) -> dict[str, str]:
             errors[CONF_RAIN_SOON_WINDOW] = "invalid_rain_soon_window"
 
     try:
-        sample_radius = int(user_input[CONF_SAMPLE_RADIUS_M])
+        sample_radius = int(
+            user_input.get(CONF_SAMPLE_RADIUS_M, DEFAULT_SAMPLE_RADIUS_M)
+        )
     except KeyError, TypeError, ValueError:
         errors[CONF_SAMPLE_RADIUS_M] = "invalid_sample_radius"
     else:
@@ -125,7 +147,9 @@ def _normalized_data(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_CONTACT: DEFAULT_CONTACT,
         CONF_RAIN_THRESHOLD: float(user_input[CONF_RAIN_THRESHOLD]),
         CONF_RAIN_SOON_WINDOW: int(user_input[CONF_RAIN_SOON_WINDOW]),
-        CONF_SAMPLE_RADIUS_M: int(user_input[CONF_SAMPLE_RADIUS_M]),
+        CONF_SAMPLE_RADIUS_M: int(
+            user_input.get(CONF_SAMPLE_RADIUS_M, DEFAULT_SAMPLE_RADIUS_M)
+        ),
         CONF_RAIN_RISK_HORIZON_HOURS: int(user_input[CONF_RAIN_RISK_HORIZON_HOURS]),
     }
 
@@ -177,10 +201,6 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
                 default=defaults[CONF_RAIN_SOON_WINDOW],
             ): vol.Coerce(int),
             vol.Required(
-                CONF_SAMPLE_RADIUS_M,
-                default=defaults[CONF_SAMPLE_RADIUS_M],
-            ): vol.Coerce(int),
-            vol.Required(
                 CONF_RAIN_RISK_HORIZON_HOURS,
                 default=defaults[CONF_RAIN_RISK_HORIZON_HOURS],
             ): vol.Coerce(int),
@@ -213,11 +233,9 @@ class RainRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors = _validate_input(user_input)
             if not errors:
                 data = _normalized_data(user_input)
-                unique_id = (
-                    f"{data[CONF_FORECAST_PROVIDER]}:"
-                    f"{_round_coord(data[CONF_LATITUDE])},"
-                    f"{_round_coord(data[CONF_LONGITUDE])}"
-                )
+                unique_id = _location_identity(data)
+                if _duplicate_location(self.hass, data):
+                    return self.async_abort(reason="already_configured")
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
                 self._pending_title = data[CONF_NAME]
@@ -273,11 +291,24 @@ class RainRadarOptionsFlow(config_entries.OptionsFlow):
         """Handle options step."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = {
+                CONF_SAMPLE_RADIUS_M: self._get(
+                    CONF_SAMPLE_RADIUS_M, DEFAULT_SAMPLE_RADIUS_M
+                ),
+                **user_input,
+            }
             errors = _validate_input(user_input)
             if not errors:
-                return self.async_create_entry(
-                    title="", data=_normalized_data(user_input)
-                )
+                data = _normalized_data(user_input)
+                if _duplicate_location(self.hass, data, self._config_entry.entry_id):
+                    errors["base"] = "already_configured"
+                else:
+                    self.hass.config_entries.async_update_entry(
+                        self._config_entry,
+                        title=data[CONF_NAME],
+                        unique_id=_location_identity(data),
+                    )
+                    return self.async_create_entry(title="", data=data)
 
         defaults = {
             CONF_NAME: self._get(CONF_NAME, DEFAULT_NAME),
