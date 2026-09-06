@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import hashlib
 import logging
+import math
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -37,6 +38,7 @@ from .models import (
     RainRiskForecast,
     RainRiskHour,
 )
+from .quality import precipitation_forecast, rain_risk_forecast
 
 _LOGGER = logging.getLogger(__name__)
 _NORDIC_RADAR_BOUNDS = RadarBounds(
@@ -76,15 +78,16 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 def _as_float(value: Any) -> float | None:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else None
+    except TypeError, ValueError:
         return None
 
 
-def _clamp_probability(value: Any) -> int:
+def _clamp_probability(value: Any) -> int | None:
     numeric = _as_float(value)
-    if numeric is None:
-        return 0
+    if numeric is None or numeric < 0:
+        return None
     return round(max(0.0, min(100.0, numeric)))
 
 
@@ -154,32 +157,16 @@ class MetNoProvider:
         updated_at = _parse_datetime(_get(payload, "properties", "meta", "updated_at"))
         samples = _parse_precipitation_samples(payload)
 
-        current = _current_precipitation(samples)
-        rain_now = (
-            current is not None and current >= options.rain_threshold
-            if samples
-            else None
-        )
-        rain_arrival = (
-            0 if rain_now is True else _arrival_minutes(samples, options.rain_threshold)
-        )
-        rain_soon = (
-            rain_arrival is not None
-            and rain_arrival <= options.rain_soon_window_minutes
-        )
-        latest_time = max((sample.time for sample in samples), default=updated_at)
-
-        return PrecipitationForecast(
-            samples=samples,
-            current_precipitation=current,
-            rain_now=rain_now,
-            rain_soon=rain_soon,
-            rain_arrival_minutes=rain_arrival,
-            updated_at=updated_at,
-            latest_time=latest_time,
-            coverage_status=coverage,
-            is_stale=_is_stale(cache.expires_at),
-            cache=cache,
+        return precipitation_forecast(
+            samples,
+            options,
+            cache,
+            updated_at,
+            coverage,
+            data_kind="nowcast",
+            resolution_minutes=5,
+            maximum_age=timedelta(minutes=30),
+            current_grace=timedelta(minutes=10),
         )
 
     async def async_get_rain_risk(
@@ -201,14 +188,18 @@ class MetNoProvider:
 
         updated_at = _parse_datetime(_get(payload, "properties", "meta", "updated_at"))
         hourly = _parse_rain_risk_hours(payload, options.rain_risk_horizon_hours)
-        max_probability = max((hour.probability for hour in hourly), default=None)
-
-        return RainRiskForecast(
-            max_probability=max_probability,
-            hourly=hourly,
-            updated_at=updated_at,
-            is_stale=_is_stale(cache.expires_at),
-            cache=cache,
+        return rain_risk_forecast(
+            hourly,
+            options.rain_risk_horizon_hours,
+            cache,
+            updated_at,
+            latest_time=max(
+                (
+                    sample.time + timedelta(hours=1)
+                    for sample in _parse_precipitation_samples(payload)
+                ),
+                default=None,
+            ),
         )
 
     async def async_get_radar_frames(
@@ -285,11 +276,16 @@ def _parse_precipitation_samples(payload: dict[str, Any]) -> list[PrecipitationS
         if time is None:
             continue
         rate = _as_float(_get(item, "data", "instant", "details", "precipitation_rate"))
-        if rate is None:
-            rate = _as_float(
-                _get(item, "data", "next_1_hours", "details", "precipitation_amount")
+        if rate is not None and rate < 0:
+            rate = None
+        samples.append(
+            PrecipitationSample(
+                time=time,
+                precipitation_rate=rate,
+                interval_start=time,
+                interval_end=time + timedelta(minutes=5),
             )
-        samples.append(PrecipitationSample(time=time, precipitation_rate=rate))
+        )
     samples.sort(key=lambda sample: sample.time)
     return samples
 
@@ -310,10 +306,10 @@ def _parse_rain_risk_hours(
         if not isinstance(item, dict):
             continue
         time = _parse_datetime(item.get("time"))
-        if time is None or time <= now:
+        if time is None or time + timedelta(hours=1) <= now:
             continue
-        if time > end:
-            break
+        if time >= end:
+            continue
 
         probability = _clamp_probability(
             _get(
@@ -328,13 +324,14 @@ def _parse_rain_risk_hours(
         hourly.append(
             RainRiskHour(
                 time=time,
+                interval_start=time,
+                interval_end=time + timedelta(hours=1),
                 probability=probability,
                 precipitation_amount=precipitation_amount,
                 symbol_code=symbol if isinstance(symbol, str) else None,
             )
         )
-        if len(hourly) >= horizon_hours:
-            break
+    hourly.sort(key=lambda hour: hour.time)
     return hourly
 
 
@@ -489,30 +486,6 @@ def _frame_url_for_time(frame_time: datetime) -> str:
         f"?type={MET_NO_RADAR_PRODUCT}&area={MET_NO_RADAR_AREA}"
         f"&content={MET_NO_RADAR_CONTENT}&time={iso_time}"
     )
-
-
-def _current_precipitation(samples: list[PrecipitationSample]) -> float | None:
-    if not samples:
-        return None
-    now = datetime.now(UTC)
-    past_or_current = [sample for sample in samples if sample.time <= now]
-    current = past_or_current[-1] if past_or_current else samples[0]
-    return current.precipitation_rate
-
-
-def _arrival_minutes(
-    samples: list[PrecipitationSample],
-    rain_threshold: float,
-) -> int | None:
-    now = datetime.now(UTC)
-    for sample in samples:
-        if sample.time < now:
-            continue
-        if sample.precipitation_rate is None:
-            continue
-        if sample.precipitation_rate >= rain_threshold:
-            return max(0, round((sample.time - now).total_seconds() / 60))
-    return None
 
 
 def _is_stale(expires_at: datetime | None) -> bool:

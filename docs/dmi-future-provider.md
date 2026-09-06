@@ -1,19 +1,11 @@
-# DMI Future Provider
+# DMI provider
 
-DMI is planned as a future provider for Denmark and nearby southern Nordic use cases. It is not implemented in the first release.
+DMI forecasts are implemented using the documented HARMONIE DINI Open Data EDR endpoint. Radar imagery for Denmark is separately supplied through Regnradar.
 
-Expected value:
+The provider derives mean precipitation intensity from valid accumulated-precipitation interval boundaries. Missing, decreasing or ambiguous boundaries remain unknown. Rain risk reports 100 when the selected rain threshold is reached within the forecast horizon, and 0 only when the available interval coverage supports a dry answer. This is a threshold result, not meteorological probability.
 
-- Better Denmark coverage.
-- Potential radar composite support.
-- Improved edge coverage for southern Sweden and Denmark.
+A shared request manager caches model data, coalesces requests and applies bounded stale handling, Retry-After, exponential backoff and jitter. A busy service may return HTTP 429; the card shows forecast availability separately from radar availability. Repeated manual reloads are unnecessary and can defeat useful runtime caching.
 
-Known challenges:
+The filename is retained so existing documentation links continue to work.
 
-- HDF5 or ODIM handling.
-- Projection mapping.
-- Larger dependency surface.
-- Efficient radar frame rendering.
-
-DMI should be implemented only after the MET Norway release is stable and the provider abstraction has proven sufficient.
-
+DMI does not currently expose a verified model-production timestamp in the normalized response. Forecast data age therefore remains unknown; the separately shown fetch time remains available. The combined data-age sensor uses an actual radar timestamp when available instead of treating a newly fetched DMI model as newly produced weather data.

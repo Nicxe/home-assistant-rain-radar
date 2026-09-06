@@ -51,6 +51,8 @@ Because of these differences, compare `sensor.<name>_rain_risk_12h` values only 
 
 ## Installation
 
+Requires Home Assistant 2026.3 or newer (Python 3.14).
+
 ### HACS
 
 Rain Radar is available as a default HACS integration:
@@ -96,10 +98,9 @@ You can also add it manually:
 | Radar source | Nordic | Regnradar source used for radar frames and map coverage. Choose Sweden for SMHI radar frames through Regnradar or Denmark for DMI radar frames through Regnradar. |
 | Rain threshold | `0.1` mm/h | Minimum intensity that counts as rain. |
 | Rain soon window | `60` minutes | Look-ahead window for the rain soon binary sensor. |
-| Sampling radius | `1000` meters | Reserved for provider strategies. MET Norway, SMHI, and DMI currently use point/grid-point forecasts. |
 | Rain risk horizon | `12` hours | Forecast horizon inspected by the rain risk sensor. |
 
-The same values can be changed later from the integration options. Setup and options text is available in English, Swedish, Finnish, Norwegian Bokmål, and Danish.
+The same values can be changed later from the integration options. Renaming a location updates its display name while retaining existing entity IDs. Duplicate checks use the current location and forecast provider, including changes made in options. The unused sampling-radius setting is hidden; previously stored values are preserved. Setup and options text is available in English, Swedish, Finnish, Norwegian Bokmål, and Danish.
 
 ## Entities
 
@@ -118,6 +119,16 @@ Rain Radar creates these entities for each configured location. Entity IDs use t
 | `sensor.<name>_latest_radar_time` | Sensor | Timestamp of the latest radar frame | Attribution and entry ID |
 
 Raw provider payloads are not stored as entity attributes. Forecast details are bounded to the values needed by dashboards and automations. For MET Norway and SMHI, the rain risk sensor is based on provider precipitation probability where available. For DMI, it is a threshold-based forecast signal because DMI does not provide the same general precipitation probability field.
+
+### Data quality and availability
+
+Missing precipitation or probability is unknown, never an implicit zero. A dry forecast requires known values throughout the selected window. MET rain-risk intervals include the current, partly elapsed hour and the final overlapping hour. Data age follows the source timestamps rather than the time a cached HTTP response was received; old forecasts cannot report current rain.
+
+MET short-term nowcast and longer-range rain risk are separate data products. If one is missing, the card still shows valid values from the other and identifies the forecast as partially available. A 120-minute rain-soon window can extend beyond the remaining nowcast coverage; unknown then means the full window cannot be assessed. When a complete window is dry, the card states that no rain arrival is expected within that window. SMHI's documented missing-value marker is treated as unknown for precipitation, probability and weather symbols.
+
+Radar and forecasts update independently. A temporary forecast outage leaves fresh radar available, including during startup. The card reports each source's status, latest successful fetch, data age, reason and next retry when known. A valid response with missing values produces `unknown`; a failed source produces `unavailable` for its affected entities. Automation conditions should handle both states explicitly instead of treating either as dry weather.
+
+The DMI 0/100 entity retains its threshold semantics. The card labels it as rain above the selected threshold, not meteorological probability. Hourly forecast arrival estimates are approximate. The legacy `rain_risk_12h` entity ID is retained even when the configured horizon differs; the card displays the selected horizon.
 
 ## Dashboard Card
 
@@ -159,6 +170,8 @@ forecast_minutes: 60
 arrival_format: auto
 height: 420
 ```
+
+The card refreshes radar metadata as new frames arrive, renews expiring image links, and retries temporary failures automatically. Its timeline distinguishes observations and radar forecasts and starts at the latest observation. A radar forecast image alone does not imply a numeric rain value at your location. Times and numbers follow your Home Assistant profile; Swedish and English card text are available.
 
 The card supports an expandable details section. Summary rows can stay visible, individual metadata rows can be enabled or disabled, and the map can be hidden when only the summary is needed.
 

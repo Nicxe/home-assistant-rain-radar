@@ -47,11 +47,21 @@ class RainRadarSensorDescription(SensorEntityDescription):
 
 
 def _data_age_minutes(data: RainRadarData) -> int | None:
+    """Return the age of the newest actual source data, excluding local refreshes."""
     timestamps = [
-        data.precipitation.updated_at,
-        data.rain_risk.updated_at,
+        data.precipitation.observation_time
+        or (
+            data.precipitation.updated_at
+            if data.options.forecast_provider != "dmi"
+            else None
+        ),
+        data.rain_risk.observation_time
+        or (
+            data.rain_risk.updated_at
+            if data.options.forecast_provider != "dmi"
+            else None
+        ),
         data.radar_frames.latest_time,
-        data.updated_at,
     ]
     latest = max((value for value in timestamps if value is not None), default=None)
     if latest is None:
@@ -67,9 +77,23 @@ def _rain_risk_attrs(data: RainRadarData) -> dict[str, Any]:
                 "probability": hour.probability,
                 "precipitation_amount": hour.precipitation_amount,
                 "symbol_code": hour.symbol_code,
+                "interval_start": hour.interval_start.isoformat()
+                if hour.interval_start
+                else None,
+                "interval_end": hour.interval_end.isoformat()
+                if hour.interval_end
+                else None,
             }
-            for hour in data.rain_risk.hourly[: data.options.rain_risk_horizon_hours]
+            for hour in data.rain_risk.hourly
         },
+        "window_hours": data.options.rain_risk_horizon_hours,
+        "probability_method": "threshold"
+        if data.options.forecast_provider == "dmi"
+        else "meteorological_probability",
+        "resolution_minutes": data.rain_risk.resolution_minutes,
+        "window_complete": data.rain_risk.window_complete,
+        "data_kind": data.rain_risk.data_kind,
+        "reason": data.rain_risk.reason,
         ATTR_IS_STALE: data.rain_risk.is_stale,
         ATTR_LAST_UPDATED: data.rain_risk.updated_at.isoformat()
         if data.rain_risk.updated_at
@@ -84,6 +108,12 @@ def _precipitation_attrs(data: RainRadarData) -> dict[str, Any]:
             {
                 "time": sample.time.isoformat(),
                 "precipitation_rate": sample.precipitation_rate,
+                "interval_start": sample.interval_start.isoformat()
+                if sample.interval_start
+                else None,
+                "interval_end": sample.interval_end.isoformat()
+                if sample.interval_end
+                else None,
             }
             for sample in data.precipitation.samples[:24]
         ],
@@ -204,7 +234,17 @@ class RainRadarSensor(RainRadarEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.data is not None
+        data = self.coordinator.data
+        if not super().available or data is None:
+            return False
+        key = self.entity_description.key
+        if key == "latest_radar_time":
+            return data.radar_status.status != "temporarily_unavailable"
+        if key == "rain_risk_12h":
+            return data.rain_risk_available
+        if key in {"precipitation_now", "rain_arrival"}:
+            return data.precipitation_available
+        return True
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -212,6 +252,7 @@ class RainRadarSensor(RainRadarEntity, SensorEntity):
         if self.coordinator.data is None:
             return {}
         attrs = {
+            **self.source_attributes,
             ATTRIBUTION: self.coordinator.data.provider_status.attribution,
             ATTR_ENTRY_ID: self._entry_id,
             ATTR_ENTITY_KEY: self.entity_description.key,

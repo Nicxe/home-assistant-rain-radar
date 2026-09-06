@@ -23,10 +23,15 @@ class RainRadarFramesView(HomeAssistantView):
         """Handle frame metadata requests."""
         hass: HomeAssistant = request.app["hass"]
         entry = hass.config_entries.async_get_entry(entry_id)
-        if entry is None or entry.domain != DOMAIN or not entry.runtime_data:
+        if entry is None or entry.domain != DOMAIN:
             return self.json({"error": "Entry not found"}, status_code=404)
 
-        data = entry.runtime_data.coordinator.data
+        runtime = getattr(entry, "runtime_data", None)
+        if runtime is None:
+            return self.json(
+                {"error": "Radar temporarily unavailable"}, status_code=503
+            )
+        data = runtime.coordinator.data
         if data is None:
             return self.json({"frames": [], "attribution": None})
 
@@ -35,6 +40,14 @@ class RainRadarFramesView(HomeAssistantView):
         return self.json(
             {
                 "entry_id": entry_id,
+                "radar_status": data.radar_status.as_dict(),
+                "forecast_status": data.forecast_status.as_dict(),
+                "links_expire_at": (
+                    datetime.now(UTC) + timedelta(minutes=10)
+                ).isoformat(),
+                "radar_updated_at": frame_set.updated_at.isoformat()
+                if frame_set.updated_at
+                else None,
                 "provider": data.provider_status.provider_name,
                 "radar_provider": "regnradar",
                 "radar_area": data.options.radar_area,
@@ -100,10 +113,15 @@ class RainRadarFrameImageView(HomeAssistantView):
         """Handle a radar image request."""
         hass: HomeAssistant = request.app["hass"]
         entry = hass.config_entries.async_get_entry(entry_id)
-        if entry is None or entry.domain != DOMAIN or not entry.runtime_data:
+        if entry is None or entry.domain != DOMAIN:
             return self.json({"error": "Entry not found"}, status_code=404)
 
-        data = entry.runtime_data.coordinator.data
+        runtime = getattr(entry, "runtime_data", None)
+        if runtime is None:
+            return self.json(
+                {"error": "Radar temporarily unavailable"}, status_code=503
+            )
+        data = runtime.coordinator.data
         if data is None:
             return self.json({"error": "Radar data not available"}, status_code=404)
 
@@ -118,11 +136,12 @@ class RainRadarFrameImageView(HomeAssistantView):
         if frame is None:
             return self.json({"error": "Frame not found"}, status_code=404)
 
-        image, cache, content_type = await entry.runtime_data.client.async_get_bytes(
+        image, cache, content_type = await runtime.client.async_get_bytes(
             frame.image_cache_key,
             frame.source_url,
             request_timeout=15,
             accept=frame.content_type,
+            immutable=frame.time is not None,
         )
         return web.Response(
             body=image,

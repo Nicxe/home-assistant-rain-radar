@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from homeassistant.util import dt as dt_util
 
-from ..api import RainRadarApiClient
+from ..api import RainRadarApiClient, RainRadarApiError
 from ..const import (
     DEFAULT_RADAR_AREA,
     PROVIDER_REGNRADAR,
@@ -81,6 +81,15 @@ class RegnradarProvider:
         self.client = client
         self.forecast_provider = forecast_provider
         self._radar_coverage_status = CoverageStatus.UNKNOWN
+        self.radar_error_reason: str | None = None
+        self.radar_last_error: str | None = None
+        self.radar_next_retry: datetime | None = None
+        self.radar_last_attempt: datetime | None = None
+        self.radar_last_success: datetime | None = None
+        self._metadata_client = client
+        if isinstance(client, RainRadarApiClient):
+            shared = client.hass.data.setdefault("rain_radar_metadata_clients", {})
+            self._metadata_client = shared.setdefault(client.contact, client)
 
     @property
     def provider_id(self) -> str:
@@ -130,17 +139,28 @@ class RegnradarProvider:
     ) -> RadarFrameSet:
         """Fetch Regnradar coverage-bubble radar frame metadata."""
         area = _radar_area(options.radar_area)
+        self.radar_last_attempt = datetime.now(UTC)
         try:
-            payload, cache = await self.client.async_get_json(
+            payload, cache = await self._metadata_client.async_get_json(
                 "regnradar_radar",
                 REGNRADAR_RADAR_URL,
                 request_timeout=10,
+                default_cache_ttl=60,
             )
-        except Exception as err:  # noqa: BLE001
+        except RainRadarApiError as err:
             _LOGGER.debug("Unable to fetch Regnradar frame metadata: %s", err)
-            return _empty_frame_set(area, self._radar_coverage_status)
+            self.radar_error_reason = err.reason or "request_failed"
+            self.radar_last_error = type(err).__name__
+            self.radar_next_retry = err.next_retry
+            self.radar_last_attempt = err.last_attempt
+            return _empty_frame_set(area, CoverageStatus.TEMPORARILY_UNAVAILABLE)
 
+        self.radar_last_attempt = cache.fetched_at
+        self.radar_error_reason = None
+        self.radar_last_error = None
+        self.radar_next_retry = None
         if not isinstance(payload, dict):
+            self.radar_error_reason = "invalid_response"
             self._radar_coverage_status = CoverageStatus.UNKNOWN
             return _empty_frame_set(area, CoverageStatus.UNKNOWN)
 
@@ -149,14 +169,12 @@ class RegnradarProvider:
             self._radar_coverage_status = CoverageStatus.OUTSIDE_COVERAGE
             return _empty_frame_set(area, CoverageStatus.OUTSIDE_COVERAGE)
 
+        self.radar_last_success = cache.fetched_at
         frames = _parse_radar_frames(area, area_payload)
         latest_time = _latest_observed_frame_time(frames)
-        no_coverage = area_payload.get("no_coverage")
         coverage_status = (
             CoverageStatus.TEMPORARILY_UNAVAILABLE if not frames else CoverageStatus.OK
         )
-        if isinstance(no_coverage, list) and no_coverage:
-            coverage_status = CoverageStatus.OK
         self._radar_coverage_status = coverage_status
 
         return RadarFrameSet(
@@ -171,7 +189,8 @@ class RegnradarProvider:
             updated_at=cache.fetched_at,
             attribution=REGNRADAR_ATTRIBUTION,
             coverage_status=coverage_status,
-            is_stale=_is_stale(cache.expires_at),
+            is_stale=latest_time is not None
+            and (datetime.now(UTC) - latest_time).total_seconds() > 1800,
             cache=cache,
         )
 
@@ -233,7 +252,7 @@ def _parse_radar_frames(area: str, payload: dict[str, Any]) -> list[RadarFrame]:
 
 def _latest_observed_frame_time(frames: list[RadarFrame]) -> datetime | None:
     """Return the latest real radar frame time, excluding forecast images."""
-    latest_observed = max(
+    return max(
         (
             frame.time
             for frame in frames
@@ -242,9 +261,6 @@ def _latest_observed_frame_time(frames: list[RadarFrame]) -> datetime | None:
         ),
         default=None,
     )
-    if latest_observed is not None:
-        return latest_observed
-    return max((frame.time for frame in frames if frame.time is not None), default=None)
 
 
 def _normalize_image_url(value: Any) -> str | None:
@@ -265,6 +281,11 @@ def _normalize_image_url(value: Any) -> str | None:
 def _parse_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
+    value = value.strip()
+    if value.endswith(" UTC"):
+        value = value.removesuffix(" UTC") + "+00:00"
+    elif value.endswith(" Z"):
+        value = value.removesuffix(" Z") + "+00:00"
     parsed = dt_util.parse_datetime(value)
     if parsed is None:
         return None
@@ -290,7 +311,3 @@ def _frame_id_for(
     else:
         suffix = hashlib.sha1(url.encode()).hexdigest()[:12]
     return f"regnradar-{area}-{frame_type}-{suffix}"
-
-
-def _is_stale(expires_at: datetime | None) -> bool:
-    return expires_at is not None and expires_at < datetime.now(UTC)

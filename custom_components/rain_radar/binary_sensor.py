@@ -94,7 +94,12 @@ class RainRadarBinarySensor(RainRadarEntity, BinarySensorEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.data is not None
+        data = self.coordinator.data
+        if not super().available or data is None:
+            return False
+        if self.entity_description.key == "radar_coverage":
+            return data.radar_status.status != "temporarily_unavailable"
+        return data.precipitation_available
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
@@ -102,8 +107,11 @@ class RainRadarBinarySensor(RainRadarEntity, BinarySensorEntity):
         if self.coordinator.data is None:
             return {}
         return {
+            **self.source_attributes,
             ATTRIBUTION: self.coordinator.data.provider_status.attribution,
             ATTR_ENTRY_ID: self._entry_id,
             ATTR_ENTITY_KEY: self.entity_description.key,
-            ATTR_IS_STALE: self.coordinator.data.precipitation.is_stale,
+            ATTR_IS_STALE: self.coordinator.data.radar_frames.is_stale
+            if self.entity_description.key == "radar_coverage"
+            else self.coordinator.data.precipitation.is_stale,
         }

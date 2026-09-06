@@ -70,6 +70,9 @@
           "rain_risk_horizon_hours": "Kuinka monta tuntia eteenpäin saderiskisensori tarkistaa. Oletus 12 tuntia vastaa aiempaa MET Rain Risk -toimintaa."
         }
       }
+    },
+    "error": {
+      "already_configured": "Tämä ennustepalvelu ja sijainti on jo määritetty."
     }
   },
   "entity": {

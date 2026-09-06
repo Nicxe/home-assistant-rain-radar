@@ -93,9 +93,7 @@ SMHI_FORECAST_URL_TEMPLATE = (
 )
 
 DMI_ATTRIBUTION = "Data from DMI"
-DMI_FORECAST_PARAMETERS = (
-    "rain-precipitation-rate,total-precipitation,precipitation-type"
-)
+DMI_FORECAST_PARAMETERS = "total-precipitation,precipitation-type"
 DMI_FORECAST_URL = (
     "https://opendataapi.dmi.dk/v1/forecastedr/collections/harmonie_dini_sf/position"
 )

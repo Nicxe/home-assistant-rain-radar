@@ -54,6 +54,7 @@ class CacheMetadata:
     etag: str | None = None
     last_modified: str | None = None
     from_cache: bool = False
+    no_store: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,8 @@ class PrecipitationSample:
 
     time: datetime
     precipitation_rate: float | None
+    interval_start: datetime | None = None
+    interval_end: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +95,11 @@ class PrecipitationForecast:
     coverage_status: CoverageStatus = CoverageStatus.UNKNOWN
     is_stale: bool = False
     cache: CacheMetadata = field(default_factory=CacheMetadata)
+    observation_time: datetime | None = None
+    data_kind: str | None = None
+    resolution_minutes: int | None = None
+    window_complete: bool | None = None
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,9 +107,11 @@ class RainRiskHour:
     """Hourly rain risk detail."""
 
     time: datetime
-    probability: int
+    probability: int | None
     precipitation_amount: float | None
     symbol_code: str | None
+    interval_start: datetime | None = None
+    interval_end: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +123,12 @@ class RainRiskForecast:
     updated_at: datetime | None = None
     is_stale: bool = False
     cache: CacheMetadata = field(default_factory=CacheMetadata)
+    observation_time: datetime | None = None
+    data_kind: str | None = None
+    resolution_minutes: int | None = None
+    window_complete: bool | None = None
+    reason: str | None = None
+    coverage_status: CoverageStatus = CoverageStatus.OK
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,3 +190,30 @@ class RadarFrameSet:
     coverage_status: CoverageStatus = CoverageStatus.UNKNOWN
     is_stale: bool = False
     cache: CacheMetadata = field(default_factory=CacheMetadata)
+
+
+@dataclass(frozen=True, slots=True)
+class SourceStatus:
+    """Independent source delivery and data freshness status."""
+
+    status: str = "unknown"
+    reason: str | None = None
+    last_success: datetime | None = None
+    last_attempt: datetime | None = None
+    next_retry: datetime | None = None
+    data_age_seconds: int | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        """Return stable JSON metadata for entities and the card."""
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "last_success": self.last_success.isoformat()
+            if self.last_success
+            else None,
+            "last_attempt": self.last_attempt.isoformat()
+            if self.last_attempt
+            else None,
+            "next_retry": self.next_retry.isoformat() if self.next_retry else None,
+            "data_age_seconds": self.data_age_seconds,
+        }
