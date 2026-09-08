@@ -278,13 +278,14 @@ def test_bundled_card_exposes_layer_and_forecast_options() -> None:
     assert "stateText(radarTime, null)" in card_text
     assert "availableForecastMinutes" in card_text
     assert "if (!Number.isFinite(sample.rate)) break" in card_text
-    assert "Forecast data +${context.forecastMinutesAvailable} min" in card_text
+    assert (
+        '${this._t("forecast_data")} +${context.forecastMinutesAvailable} min'
+        in card_text
+    )
     assert "has-forecast" in card_text
     assert "repeating-linear-gradient" in card_text
-    assert "forecastSegment.hidden = !hasForecast" in card_text
-    assert (
-        'forecastSegment.title = "Point forecast data, not radar imagery"' in card_text
-    )
+    assert "forecastSegment.hidden = forecast === 0" in card_text
+    assert 'forecastSegment.title = this._t("radar_forecast")' in card_text
     assert "locationFromPayload" in card_text
     assert "boundsFromPayload" in card_text
     assert "Forecast +60 min" not in card_text
@@ -350,19 +351,19 @@ def test_bundled_card_crossfades_after_next_layer_loads() -> None:
     card_text = Path(frontend._card_file_path()).read_text(encoding="utf-8")
 
     assert (
-        'if (!this._radarLayer) {\n      this._showMapStatus("Loading radar layer");'
+        'if (!this._radarLayer) {\n      this._showMapStatus(this._t("radar_loading"));'
         in card_text
     )
-    assert "const layerLoaded = this._waitForLayerLoad(nextLayer)" in card_text
+    assert "const layerLoaded = this._waitForLayerLoad(nextLayer, request)" in card_text
     assert "nextLayer.addTo(this._map)" in card_text
     assert "await this._withTimeout(" in card_text
     assert 'nextLayer.once("load", fadeIn)' not in card_text
     assert "requestAnimationFrame(fadeIn)" not in card_text
 
     layer_load_index = card_text.index(
-        "const layerLoaded = this._waitForLayerLoad(nextLayer)"
+        "const layerLoaded = this._waitForLayerLoad(nextLayer, request)"
     )
-    fade_out_index = card_text.index("previousLayer?.setOpacity(0)")
+    fade_out_index = card_text.index("this._fadeRadarLayers(nextLayer)")
     assert layer_load_index < fade_out_index
 
 

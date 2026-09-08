@@ -70,6 +70,9 @@
           "rain_risk_horizon_hours": "Hur många timmar framåt som ska kontrolleras för regnrisksensorn. Standardvärdet 12 timmar matchar tidigare beteende i MET Rain Risk."
         }
       }
+    },
+    "error": {
+      "already_configured": "Den här prognosleverantören och platsen är redan konfigurerade."
     }
   },
   "entity": {

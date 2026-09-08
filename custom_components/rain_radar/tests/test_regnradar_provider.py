@@ -228,3 +228,138 @@ async def test_regnradar_delegates_point_forecasts_to_fallback_provider() -> Non
     assert precipitation.coverage_status == CoverageStatus.OK
     assert rain_risk.max_probability == 42
     assert provider.coverage_status == CoverageStatus.UNKNOWN
+
+
+async def test_metadata_failure_does_not_reuse_healthy_delivery_status():
+    """A coverage area remains geographical while a failed request is visible."""
+    from unittest.mock import AsyncMock
+
+    from custom_components.rain_radar.api import RainRadarApiTemporaryError
+
+    client = FakeClient(_payload())
+    provider = RegnradarProvider(client, forecast_provider=FakeForecastProvider())
+    await provider.async_get_radar_frames(Location(59, 18), _options())
+    client.async_get_json = AsyncMock(
+        side_effect=RainRadarApiTemporaryError("Radar down", reason="server_error")
+    )
+    frames = await provider.async_get_radar_frames(Location(59, 18), _options())
+    assert not frames.frames
+    assert frames.coverage_status == CoverageStatus.TEMPORARILY_UNAVAILABLE
+    assert provider.radar_error_reason == "server_error"
+
+
+async def test_empty_images_with_coverage_polygons_are_not_healthy():
+    """Coverage polygons cannot stand in for actual radar images."""
+    payload = _payload()
+    payload["sweden"]["images"] = []
+    provider = RegnradarProvider(
+        FakeClient(payload), forecast_provider=FakeForecastProvider()
+    )
+    frames = await provider.async_get_radar_frames(Location(59, 18), _options("sweden"))
+    assert frames.coverage_status == CoverageStatus.TEMPORARILY_UNAVAILABLE
+
+
+async def test_old_images_are_stale_despite_fresh_http_cache():
+    """HTTP metadata cannot make an old radar observation current."""
+    provider = RegnradarProvider(
+        FakeClient(_payload()), forecast_provider=FakeForecastProvider()
+    )
+    frames = await provider.async_get_radar_frames(Location(59, 18), _options())
+    assert frames.is_stale
+
+
+async def test_multiple_locations_share_regnradar_metadata(hass, monkeypatch):
+    """The common area listing is fetched only once across config entries."""
+    from custom_components.rain_radar import api as api_module
+    from custom_components.rain_radar.api import RainRadarApiClient
+
+    from .test_api import _Response, _SequenceSession
+
+    session = _SequenceSession(
+        _Response(200, payload=_payload(), headers={"Cache-Control": "max-age=60"})
+    )
+    monkeypatch.setattr(
+        api_module.aiohttp_client, "async_get_clientsession", lambda hass: session
+    )
+    providers = [
+        RegnradarProvider(
+            RainRadarApiClient(hass, "same-contact"),
+            forecast_provider=FakeForecastProvider(),
+        )
+        for _ in range(2)
+    ]
+    await providers[0].async_get_radar_frames(Location(59, 18), _options("sweden"))
+    await providers[1].async_get_radar_frames(Location(60, 17), _options("nordic"))
+    assert len(session.request_headers) == 1
+
+
+async def test_forecast_only_images_do_not_invent_recent_observation():
+    """Future imagery must not hide the absence of observed radar data."""
+    payload = _payload()
+    payload["nordic"]["images"] = [payload["nordic"]["images"][1]]
+    provider = RegnradarProvider(
+        FakeClient(payload), forecast_provider=FakeForecastProvider()
+    )
+    frames = await provider.async_get_radar_frames(Location(59, 18), _options())
+    assert frames.latest_time is None
+    assert not frames.is_stale
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("time_utc", "2026-09-06 10:00:00 UTC"),
+        ("time_js", "2026-09-06 10:00:00 Z"),
+        ("created_at", "2026-09-06 10:00:00 UTC"),
+    ],
+)
+async def test_live_regnradar_timestamp_format(field, value):
+    """Normalize the UTC suffixes used by live Regnradar metadata."""
+    payload = {
+        "denmark": {
+            "images": [
+                {
+                    "image_url": "//api.regnradar.se/radar/file/256035.png",
+                    "type": "obs",
+                    field: value,
+                }
+            ]
+        }
+    }
+    provider = RegnradarProvider(
+        FakeClient(payload), forecast_provider=FakeForecastProvider()
+    )
+    frames = await provider.async_get_radar_frames(
+        Location(59, 18), _options("denmark")
+    )
+    assert frames.latest_time == datetime(2026, 9, 6, 10, tzinfo=UTC)
+
+
+async def test_http_revalidation_deadline_does_not_age_fresh_observation():
+    """An expired HTTP cache is not an expired radar observation."""
+    from unittest.mock import AsyncMock
+
+    now = datetime.now(UTC)
+    client = FakeClient({})
+    client.async_get_json = AsyncMock(
+        return_value=(
+            {
+                "denmark": {
+                    "images": [
+                        {
+                            "image_url": "//api.regnradar.se/radar/file/256035.png",
+                            "time_utc": (now - timedelta(minutes=20)).isoformat(),
+                            "type": "obs",
+                        }
+                    ]
+                }
+            },
+            CacheMetadata(fetched_at=now, expires_at=now - timedelta(seconds=1)),
+        )
+    )
+    provider = RegnradarProvider(client, forecast_provider=FakeForecastProvider())
+    frames = await provider.async_get_radar_frames(
+        Location(59, 18), _options("denmark")
+    )
+    assert not frames.is_stale
+    assert provider.radar_last_success == now

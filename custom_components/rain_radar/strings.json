@@ -70,6 +70,9 @@
           "rain_risk_horizon_hours": "How many hours ahead to inspect for the rain risk sensor. The default 12 hours matches the previous MET Rain Risk behavior."
         }
       }
+    },
+    "error": {
+      "already_configured": "This forecast provider and location are already configured."
     }
   },
   "entity": {

@@ -80,7 +80,7 @@ const DEFAULT_CONFIG = {
   meta_order: DEFAULT_META_ORDER,
   show_timeline: true,
   show_status_strip: true,
-  show_legend: false,
+  show_legend: true,
   show_info_panel: false,
   show_location_marker: true,
   show_forecast: true,
@@ -123,10 +123,13 @@ function parseTime(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function localTime(value) {
+function localTime(value, locale = {}, includeDate = false) {
   const date = parseTime(value);
-  if (!date) return "Unknown";
-  return new Intl.DateTimeFormat(undefined, {
+  if (!date) return locale.language?.startsWith("sv") ? "Okänt" : "Unknown";
+  const hour12 = locale.time_format === "12" ? true : locale.time_format === "24" ? false : undefined;
+  return new Intl.DateTimeFormat(locale.time_format === "system" ? undefined : locale.language, {
+    ...(includeDate ? { month: "short", day: "numeric" } : {}),
+    ...(hour12 === undefined ? {} : { hour12 }),
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
@@ -200,11 +203,12 @@ function minuteValue(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function numberText(value, suffix = "") {
+function numberText(value, suffix = "", locale = {}) {
   if (value === null || value === undefined) return "Unknown";
   const number = Number(value);
   if (!Number.isFinite(number)) return "Unknown";
-  return `${Math.round(number * 10) / 10}${suffix}`;
+  const formats = { comma_decimal: "en-US", decimal_comma: "de-DE", space_comma: "sv-SE" };
+  return `${new Intl.NumberFormat(formats[locale.number_format] || (locale.number_format === "none" ? "en-US" : locale.number_format === "system" ? undefined : locale.language), { maximumFractionDigits: 1, useGrouping: locale.number_format !== "none" }).format(number)}${suffix}`;
 }
 
 function stateText(stateObj, fallback = "Unknown") {
@@ -248,15 +252,39 @@ function locationNameFromEntity(main) {
   return name.replace(/\s+rain\s+soon$/i, "").trim();
 }
 
+function entryIdForEntity(hass, entityId) {
+  const direct = hass?.states?.[entityId]?.attributes?.rain_radar_entry_id;
+  if (direct) return direct;
+  // HA omits custom state attributes for unavailable entities at cold start.
+  // Resolve their integration and device through the frontend entity registry.
+  const registry = hass?.entities?.[entityId];
+  if (registry?.platform !== "rain_radar") return null;
+  if (registry.config_entry_id) return registry.config_entry_id;
+  if (!registry.device_id) return null;
+  const companion = Object.values(hass.states || {}).find((state) =>
+    state.attributes?.rain_radar_entry_id &&
+    hass.entities?.[state.entity_id]?.platform === "rain_radar" &&
+    hass.entities[state.entity_id].device_id === registry.device_id
+  );
+  if (companion) return companion.attributes.rain_radar_entry_id;
+  const entries = hass.devices?.[registry.device_id]?.config_entries;
+  // Do not guess if the device belongs to more than one configuration entry.
+  return Array.isArray(entries) && entries.length === 1 ? entries[0] : null;
+}
+
 function findEntity(hass, entryId, entityKey, legacySuffix) {
-  const entryEntities = Object.values(hass.states).filter((entity) => {
-    const attrs = entity.attributes || {};
-    return attrs.rain_radar_entry_id === entryId;
-  });
+  const states = Object.values(hass?.states || {});
+  const entryEntities = states.filter((entity) =>
+    entity.attributes?.rain_radar_entry_id === entryId
+  );
   return (
-    entryEntities.find(
-      (entity) => entity.attributes?.rain_radar_entity_key === entityKey
-    ) || entryEntities.find((entity) => entity.entity_id.endsWith(legacySuffix))
+    entryEntities.find((entity) => entity.attributes?.rain_radar_entity_key === entityKey) ||
+    states.find((entity) =>
+      hass.entities?.[entity.entity_id]?.platform === "rain_radar" &&
+      hass.entities[entity.entity_id].translation_key === entityKey &&
+      entryIdForEntity(hass, entity.entity_id) === entryId
+    ) ||
+    entryEntities.find((entity) => entity.entity_id.endsWith(legacySuffix))
   );
 }
 
@@ -293,8 +321,8 @@ function splitMetaOrder(rawOrder) {
 }
 
 function locationFromPayload(payload) {
-  const latitude = Number(payload?.latitude);
-  const longitude = Number(payload?.longitude);
+  const latitude = minuteValue(payload?.latitude);
+  const longitude = minuteValue(payload?.longitude);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   return { latitude, longitude };
 }
@@ -347,28 +375,39 @@ function forecastSamples(precipitation, minutes) {
   if (!Array.isArray(samples)) return [];
 
   const now = Date.now();
-  const windowMs =
-    clamp(Number(minutes) || DEFAULT_CONFIG.forecast_minutes, 15, 180) * 60 * 1000;
+  const windowEnd = now +
+    clamp(Number(minutes) || DEFAULT_CONFIG.forecast_minutes, 15, 180) * 60000;
   const parsed = samples
     .map((sample) => {
       const time = parseTime(sample.time);
-      const rate = Number(sample.precipitation_rate);
+      const rate = minuteValue(sample.precipitation_rate);
       if (!time) return null;
+      const start = parseTime(sample.interval_start)?.getTime();
+      const end = parseTime(sample.interval_end)?.getTime();
+      const hasInterval = Number.isFinite(start) && Number.isFinite(end) && end > start;
       return {
         time,
         timeMs: time.getTime(),
+        intervalStartMs: hasInterval ? start : null,
+        intervalEndMs: hasInterval ? end : null,
+        coverageEndMs: Math.min(hasInterval ? end : time.getTime(), windowEnd),
         rate: Number.isFinite(rate) ? rate : null,
       };
     })
-    .filter((sample) => sample && sample.timeMs >= now - 2 * 60 * 1000)
-    .filter((sample) => sample.timeMs <= now + windowMs)
-    .sort((a, b) => a.timeMs - b.timeMs);
+    .filter((sample) => sample && (sample.intervalEndMs !== null
+      ? sample.intervalEndMs > now && sample.intervalStartMs < windowEnd
+      : sample.timeMs >= now - 2 * 60000 && sample.timeMs <= windowEnd))
+    .sort((a, b) => (a.intervalStartMs ?? a.timeMs) - (b.intervalStartMs ?? b.timeMs));
 
   const available = [];
+  let coveredUntil = now;
   for (const sample of parsed) {
     if (!Number.isFinite(sample.rate)) break;
+    // The current and final partial intervals count, but a gap does not.
+    if (sample.intervalStartMs !== null && sample.intervalStartMs > coveredUntil) break;
     available.push(sample);
-    if (available.length >= 16) break;
+    coveredUntil = Math.max(coveredUntil, sample.coverageEndMs);
+    if (coveredUntil >= windowEnd || available.length >= 256) break;
   }
   return available;
 }
@@ -382,8 +421,13 @@ function arrivalMinutesFromForecastSamples(precipitation, threshold) {
   const nextRain = samples
     .map((sample) => {
       const time = parseTime(sample.time);
-      const rate = Number(sample.precipitation_rate);
+      const rate = minuteValue(sample.precipitation_rate);
       if (!time || !Number.isFinite(rate) || rate < rainThreshold) return null;
+      const start = parseTime(sample.interval_start)?.getTime();
+      const end = parseTime(sample.interval_end)?.getTime();
+      if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+        return end > now ? Math.max(now, start) : null;
+      }
       return time.getTime();
     })
     .filter((timeMs) => timeMs !== null && timeMs >= now - 2 * 60 * 1000)
@@ -415,9 +459,9 @@ function buildTimelineFrames(frames) {
 function availableForecastMinutes(samples) {
   if (!samples.length) return 0;
 
-  const latestForecast = samples[samples.length - 1];
-  const minutes = Math.round((latestForecast.timeMs - Date.now()) / 60000);
-  return Math.max(1, minutes);
+  const end = Math.max(...samples.map((sample) => sample.coverageEndMs ?? sample.timeMs));
+  const minutes = Math.round((end - Date.now()) / 60000);
+  return Math.max(0, minutes);
 }
 
 function precipitationColor(rate, threshold) {
@@ -452,9 +496,10 @@ function framePhase(frame) {
 
 function forecastSummary(frame, threshold) {
   if (!frame || frame.kind !== "forecast") return "";
-  const rate = Number(frame.rate);
+  const rate = minuteValue(frame.rate);
   if (!Number.isFinite(rate) && frame.imageUrl) return "Radar forecast image";
-  if (!Number.isFinite(rate) || rate < threshold) return "No rain forecast";
+  if (!Number.isFinite(rate)) return "Forecast unknown";
+  if (rate < threshold) return "No rain forecast";
   return `${numberText(rate, " mm/h")} forecast`;
 }
 
@@ -574,6 +619,15 @@ class RainRadarCard extends HTMLElement {
     this._playing = false;
     this._timer = null;
     this._frameEntryId = null;
+    this._requestGeneration = 0;
+    this._frameRequest = null;
+    this._refreshTimer = null;
+    this._loadedRadarVersion = null;
+    this._retryAt = 0;
+    this._retryCount = 0;
+    this._linksExpireAt = 0;
+    this._disconnected = false;
+    this._online = null;
     this._location = null;
     this._radarBounds = { ...DEFAULT_RADAR_BOUNDS };
     this._radarMetadata = {};
@@ -590,6 +644,9 @@ class RainRadarCard extends HTMLElement {
     this._overlayToken = 0;
     this._radarLayer = null;
     this._radarLayerKey = "";
+    this._pendingOverlay = null;
+    this._radarBlendLayers = new Map();
+    this._radarFadeAnimation = null;
     this._overlayCache = new Map();
     this._overlayCacheGeneration = 0;
     this._locationMarker = null;
@@ -630,25 +687,93 @@ class RainRadarCard extends HTMLElement {
     this._expanded = false;
     this._layoutRendered = false;
     this._destroyMap();
+    this._refreshFrames();
     this._ensureLayout();
     this._update();
   }
 
   set hass(hass) {
+    const oldLocale = JSON.stringify(this._locale());
+    const reconnected = this._online === false && hass.connected !== false;
     this._hass = hass;
-    const stateObj = hass.states[this._config?.entity];
-    const entryId = stateObj?.attributes?.rain_radar_entry_id;
-    if (entryId && entryId !== this._frameEntryId) {
-      this._frameEntryId = entryId;
-      this._loadFrames(entryId);
+    this._online = hass.connected !== false;
+    if (oldLocale !== JSON.stringify(this._locale())) {
+      this._layoutRendered = false;
+      this._destroyMap();
     }
+    this._refreshFrames(reconnected);
+    this._ensureLayout();
+    this._update();
+  }
+
+  connectedCallback() {
+    this._disconnected = false;
+    this._refreshFrames(true);
     this._ensureLayout();
     this._update();
   }
 
   disconnectedCallback() {
+    this._disconnected = true;
+    this._requestGeneration += 1;
+    this._frameRequest = null;
+    window.clearTimeout(this._refreshTimer);
+    this._refreshTimer = null;
     this._stop();
     this._destroyMap();
+  }
+
+  _radarVersion(entryId) {
+    const radar = findEntity(this._hass, entryId, "latest_radar_time", "_latest_radar_time");
+    const selected = this._hass.states[this._config?.entity];
+    const attrs = radar?.attributes || selected?.attributes || {};
+    return JSON.stringify([radar?.state, attrs.radar_latest_time, attrs.radar_updated_at,
+      attrs.radar_status]);
+  }
+
+  _refreshFrames(force = false) {
+    if (this._disconnected || !this._hass?.callApi || this._online === false) return;
+    const entryId = entryIdForEntity(this._hass, this._config?.entity);
+    if (!entryId) {
+      if (this._frameEntryId) {
+        this._requestGeneration += 1;
+        this._frameRequest = null;
+        this._frameEntryId = null;
+        this._frames = [];
+        this._location = null;
+        this._radarMetadata = {};
+        window.clearTimeout(this._refreshTimer);
+        this._stop();
+        this._destroyMap();
+      }
+      return;
+    }
+    if (entryId !== this._frameEntryId) {
+      this._requestGeneration += 1;
+      this._frameRequest = null;
+      this._frameEntryId = entryId;
+      this._frames = [];
+      this._location = null;
+      this._radarMetadata = {};
+      this._linksExpireAt = 0;
+      this._loadedRadarVersion = null;
+      this._retryAt = 0;
+      this._retryCount = 0;
+      this._defaultModeApplied = false;
+      this._stop();
+      this._destroyMap();
+    }
+    const version = this._radarVersion(entryId);
+    if (!this._frameRequest && Date.now() >= this._retryAt &&
+        (force || version !== this._loadedRadarVersion || Date.now() >= this._linksExpireAt)) {
+      this._loadFrames(entryId, version);
+    }
+  }
+
+  _scheduleFrameRefresh(delay) {
+    window.clearTimeout(this._refreshTimer);
+    if (this._disconnected) return;
+    this._refreshTimer = window.setTimeout(() => this._refreshFrames(true), Math.max(1000, delay));
   }
 
   getCardSize() {
@@ -664,10 +789,16 @@ class RainRadarCard extends HTMLElement {
     };
   }
 
-  async _loadFrames(entryId) {
-    if (!this._hass?.callApi) return;
+  async _loadFrames(entryId, version = this._radarVersion(entryId)) {
+    if (!this._hass?.callApi || this._frameRequest) return;
+    const generation = ++this._requestGeneration;
+    this._frameRequest = generation;
     try {
       const payload = await this._hass.callApi("GET", `rain_radar/${entryId}/frames`);
+      if (generation !== this._requestGeneration || entryId !== this._frameEntryId || this._disconnected) return;
+      const oldFrame = this._context().activeFrame;
+      const oldTimeline = buildTimelineFrames(this._frames);
+      const followedLatest = !oldFrame || oldFrame.id === oldTimeline.filter((frame) => frame.kind === "observed").at(-1)?.id;
       this._frames = Array.isArray(payload.frames) ? payload.frames : [];
       this._location = locationFromPayload(payload.location);
       this._radarBounds = boundsFromPayload(payload.bounds);
@@ -676,29 +807,46 @@ class RainRadarCard extends HTMLElement {
         coverageStatus: payload.coverage_status,
         expiresAt: payload.expires_at,
         imageSize: payload.image_size || null,
-        productId: payload.product_id || "5level_reflectivity",
+        productId: payload.product_id || "",
         projectionId: payload.projection_id || "",
         overlayMode: payload.overlay_mode || "precipitation_mask",
         colorScale: Array.isArray(payload.color_scale) ? payload.color_scale : [],
         isStale: payload.is_stale === true,
+        radarStatus: payload.radar_status,
+        forecastStatus: payload.forecast_status,
       };
-      this._activeFrame = Math.max(0, this._frames.length - 1);
+      const timeline = buildTimelineFrames(this._frames);
+      const previousIndex = timeline.findIndex((frame) => frame.id === oldFrame?.id);
+      const latestObserved = timeline.findLastIndex((frame) => frame.kind === "observed");
+      this._activeFrame = !followedLatest && previousIndex >= 0 ? previousIndex : Math.max(0, latestObserved);
+      this._loadedRadarVersion = version;
+      this._retryCount = 0;
+      this._retryAt = 0;
+      // Signed image URLs live ten minutes. Renew early even without HA state updates.
+      this._linksExpireAt = Math.min(parseTime(payload.links_expire_at)?.getTime() || Infinity, Date.now() + 10 * 60000) - 60000;
+      this._scheduleFrameRefresh(this._linksExpireAt - Date.now());
       this._preloadFrames();
       this._update();
-      if (
-        !this._defaultModeApplied &&
-        this._config?.default_animation_mode === "playing" &&
-        this._context().timelineFrames.length > 1
-      ) {
+      if (!this._defaultModeApplied && this._config?.default_animation_mode === "playing" &&
+          !globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches && timeline.length > 1) {
         this._defaultModeApplied = true;
         this._start();
       }
     } catch (error) {
-      this._frames = [];
-      this._location = null;
-      this._radarBounds = { ...DEFAULT_RADAR_BOUNDS };
-      this._radarMetadata = {};
+      if (generation !== this._requestGeneration || this._disconnected) return;
+      this._retryCount += 1;
+      const delay = Math.min(5 * 60000, 15000 * 2 ** Math.min(this._retryCount - 1, 5));
+      this._retryAt = Date.now() + delay;
+      this._radarMetadata = { ...this._radarMetadata, isStale: this._frames.length > 0,
+        radarStatus: { status: "temporarily_unavailable", reason: "metadata_unavailable", next_retry: new Date(this._retryAt).toISOString() } };
+      this._scheduleFrameRefresh(delay);
       this._update();
+    } finally {
+      if (this._frameRequest === generation) {
+        this._frameRequest = null;
+        // An update received during the request must not be lost.
+        if (!this._disconnected && !this._retryAt && version !== this._radarVersion(entryId)) this._refreshFrames();
+      }
     }
   }
 
@@ -772,8 +920,9 @@ class RainRadarCard extends HTMLElement {
 
   _context() {
     const hass = this._hass;
-    const main = hass?.states?.[this._config?.entity];
-    const entryId = main?.attributes?.rain_radar_entry_id;
+    const selected = hass?.states?.[this._config?.entity];
+    const entryId = entryIdForEntity(hass, this._config?.entity);
+    const main = entryId ? findEntity(hass, entryId, "rain_soon", "_rain_soon") : null;
     const precipitation = entryId
       ? findEntity(hass, entryId, "precipitation_now", "_precipitation_now")
       : null;
@@ -813,6 +962,7 @@ class RainRadarCard extends HTMLElement {
 
     return {
       main,
+      selected,
       entryId,
       precipitation,
       arrival,
@@ -826,7 +976,11 @@ class RainRadarCard extends HTMLElement {
       forecastWindow,
       forecastMinutesAvailable: availableForecastMinutes(forecastData),
       threshold,
-      isUnavailable: !main || main.state === "unavailable",
+      isUnavailable: !this._frames.length,
+      radarStatus: this._radarMetadata.radarStatus?.reason === "metadata_unavailable" ? this._radarMetadata.radarStatus : (selected?.attributes?.radar_status || this._radarMetadata.radarStatus || {}),
+      forecastStatus: selected?.attributes?.forecast_status || provider?.attributes?.forecast_status || this._radarMetadata.forecastStatus || {
+        status: precipitation?.attributes?.is_stale ? "stale" : provider?.attributes?.coverage_status || (main?.state === "unavailable" ? "temporarily_unavailable" : ["on", "off"].includes(main?.state) ? "ok" : "unknown"),
+      },
       rainingSoon: main?.state === "on",
       coverageOk: coverage?.state === "on",
       height: Math.max(300, Number(this._config?.height || DEFAULT_CONFIG.height)),
@@ -870,8 +1024,7 @@ class RainRadarCard extends HTMLElement {
         }
 
         .alert {
-          display: grid;
-          grid-template-columns: auto 1fr;
+          display: block;
           gap: 12px;
           align-items: start;
           padding: 12px;
@@ -1063,7 +1216,7 @@ class RainRadarCard extends HTMLElement {
 
         .rain-radar-overlay {
           image-rendering: auto;
-          transition: opacity 360ms ease;
+          mix-blend-mode: plus-lighter;
           will-change: opacity;
         }
 
@@ -1312,7 +1465,17 @@ class RainRadarCard extends HTMLElement {
           white-space: nowrap;
         }
 
+        .source-status { display: grid; gap: 4px; margin: 10px 0; font-size: 0.82rem; color: var(--secondary-text-color); }
+        .source-status [data-status="temporarily_unavailable"], .source-status [data-status="stale"], .source-status [data-status="partial"] { color: var(--primary-text-color); border-inline-start: 3px solid var(--warning-color, #d18c00); padding-inline-start: 7px; }
+        .source-status [data-status="ok"] { color: var(--secondary-text-color); }
+        .product-legend { position: absolute; bottom: 22px; left: 8px; right: 8px; z-index: 450; padding: 6px 8px; border-radius: 6px; background: var(--card-background-color); color: var(--secondary-text-color); font-size: 0.7rem; pointer-events: none; }
+        .product-legend .swatches { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+        .product-legend i { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 2px; }
+        button:focus-visible, [role="button"]:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
         @media (max-width: 520px) {
+          .radar { height: clamp(280px, 85vw, 420px) !important; }
+
           .alert {
             gap: 10px;
             padding: 12px 10px;
@@ -1341,11 +1504,9 @@ class RainRadarCard extends HTMLElement {
       <ha-card>
         <div class="alerts">
           <div class="alert rain-unknown">
-            <div class="icon-col">
-              <ha-icon class="icon" icon="mdi:weather-cloudy-alert"></ha-icon>
-            </div>
             <div class="content">
               <div class="title">
+                <div class="icon-col"><ha-icon class="icon" icon="mdi:weather-cloudy-alert"></ha-icon></div>
                 <div class="district"></div>
                 <div class="toggle-col">
                   <div
@@ -1356,6 +1517,7 @@ class RainRadarCard extends HTMLElement {
                   ></div>
                 </div>
               </div>
+              <div class="source-status" aria-live="polite"><div class="radar-health"></div><div class="forecast-health"></div></div>
               ${this._metaSectionHtml("inline")}
               <div class="details" hidden>
                 <div class="details-content">
@@ -1416,7 +1578,8 @@ class RainRadarCard extends HTMLElement {
             <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
           </button>
         </div>
-        <div class="map-status"></div>
+        <div class="map-status" role="status"></div>
+        <div class="product-legend"></div>
         <div class="message">
           <div>${escapeHtml(this._t("data_unavailable"))}</div>
         </div>
@@ -1504,7 +1667,8 @@ class RainRadarCard extends HTMLElement {
       radarMetadata,
     } = context;
 
-    const status = rainSoonStatus(main);
+    const validity = this._forecastValidity(context);
+    const status = rainSoonStatus(validity.rainSoon);
     const statusLabel = this._t(status.labelKey);
     const alert = this.shadowRoot.querySelector(".alert");
     alert.classList.toggle("rain-on", status.className === "rain-on");
@@ -1522,30 +1686,39 @@ class RainRadarCard extends HTMLElement {
 
     const staleText = radarMetadata?.isStale ? ` ${this._t("stale_radar")}` : "";
     const locationName = locationNameFromEntity(main);
-    const providerName = stateText(provider, "MET Norway");
+    const forecastProvider = provider?.attributes?.forecast_provider_id;
+    const providerName = ({ dmi: "DMI", smhi: "SMHI", met_no: "MET Norway" })[forecastProvider] || stateText(provider, this._t("unknown"));
     const coverageText = coverageOk ? this._t("coverage_active") : this._t("coverage_unknown");
-    const latestRadar = latestRadarText(timelineFrames, radarTime);
+    const latestObservation = timelineFrames.filter((frame) => frame.kind === "observed").at(-1);
+    const latestRadar = this._time(stateText(radarTime, null) || latestObservation?.time);
     const forecastText =
-      this._config.show_forecast && context.forecastMinutesAvailable
+      validity.pointData && this._config.show_forecast && context.forecastMinutesAvailable
         ? `${this._t("forecast_data")} +${context.forecastMinutesAvailable} min`
         : this._t("forecast_unavailable");
 
     this._setMetaValue("status", statusLabel);
-    this._setMetaValue(
-      "precipitation",
-      numberText(
-      stateText(precipitation, null),
-      " mm/h"
-      )
-    );
-    this._setMetaValue("arrival", arrivalText(
-      context.arrivalMinutes,
-      this._config.arrival_format
-    ));
-    this._setMetaValue("risk", numberText(
-      stateText(risk, null),
-      "%"
-    ));
+    this._setMetaValue("precipitation", this._number(validity.precipitationValue, " mm/h"));
+    const resolution = minuteValue(precipitation?.attributes?.resolution_minutes || arrival?.attributes?.resolution_minutes);
+    const dryWindow = minuteValue(precipitation?.attributes?.rain_soon_window_minutes);
+    const knownDryWindow = validity.rainSoon?.state === "off" &&
+      precipitation?.attributes?.window_complete === true && dryWindow > 0;
+    this._setMetaValue("arrival", validity.arrival && context.arrivalMinutes !== null
+      ? this._arrival(context.arrivalMinutes, resolution)
+      : knownDryWindow ? `${this._t("no_arrival_within")} ${this._number(dryWindow)} min`
+        : this._t("unknown"));
+    const riskValue = validity.riskValue;
+    const thresholdMethod = risk?.attributes?.probability_method === "threshold" || /DMI/i.test(providerName);
+    const riskText = thresholdMethod
+      ? (riskValue === null ? this._t("unknown") : this._t(riskValue > 0 ? "threshold_wet" : "threshold_dry")) + ` (${this._t("threshold_method")})`
+      : this._number(riskValue, "%");
+    this._setMetaValue("risk", riskText + (riskValue !== null && risk?.attributes?.window_complete === false
+      ? ` · ${this._t("partial_window")}` : ""));
+    const hours = minuteValue(risk?.attributes?.window_hours ?? risk?.attributes?.forecast_hours ?? 12);
+    this.shadowRoot.querySelectorAll('[data-meta-key="risk"] b').forEach((label) => {
+      label.textContent = `${this._t("risk")} (${this._number(hours)} h):`;
+    });
+    this._syncSourceStatus(context, providerName);
+    this._syncLegend(context);
     this._setMetaValue("latest_radar", latestRadar || this._t("unknown"));
     this._setMetaValue("coverage", `${coverageText}${staleText}`);
     this._setMetaValue("provider", locationName ? `${locationName} - ${providerName}` : providerName);
@@ -1558,18 +1731,16 @@ class RainRadarCard extends HTMLElement {
     this.shadowRoot.querySelector(".message").hidden = !isUnavailable;
     this.shadowRoot.querySelector(".info-panel").hidden = !this._config.show_info_panel;
     this.shadowRoot.querySelector(".info-panel strong").textContent =
-      activeFrame?.kind === "forecast" ? "MET Norway nowcast forecast" : "MET Norway radar";
+      `${radarMetadata.attribution || this._t("radar")} · ${this._t(activeFrame?.kind === "forecast" ? "radar_forecast" : "observation")}`;
     this.shadowRoot.querySelector(".info-status").textContent =
       activeFrame?.kind === "forecast"
-        ? forecastSummary(activeFrame, threshold) || "Forecast point sample"
-        : rainingSoon
-          ? "Rain is expected inside the configured window."
-          : "No rain is expected inside the configured window.";
+        ? this._forecastSummary(activeFrame, threshold)
+        : statusLabel;
     this.shadowRoot.querySelector(".info-attribution").textContent =
       provider?.attributes?.attribution ||
       main?.attributes?.attribution ||
       radarMetadata?.attribution ||
-      this._t("data_from_met");
+      this._t("unknown");
 
     this._syncFrameUi(activeFrame, context);
     this._syncTimelineBand(context);
@@ -1677,24 +1848,23 @@ class RainRadarCard extends HTMLElement {
     const hasTimeline = this._config.show_timeline && timelineFrames.length > 1;
     const forecastDetail =
       this._config.show_forecast && context.forecastMinutesAvailable
-        ? `Forecast data +${context.forecastMinutesAvailable} min`
+        ? `${this._t("forecast_data")} +${context.forecastMinutesAvailable} min`
         : "";
-    const detail = forecastSummary(activeFrame, context.threshold) || forecastDetail;
-    this.shadowRoot.querySelector(".timeline-phase").textContent = framePhase(activeFrame);
+    const detail = this._forecastSummary(activeFrame, context.threshold) || forecastDetail;
+    this.shadowRoot.querySelector(".timeline-phase").textContent = this._t(activeFrame ? (activeFrame.kind === "forecast" ? "radar_forecast" : "observation") : "waiting");
     this.shadowRoot.querySelector(".timeline-detail").textContent = detail;
-    this.shadowRoot.querySelector(".frame-time").textContent = frameLabel(
-      activeFrame,
-      context.radarTime?.state
-    );
+    this.shadowRoot.querySelector(".frame-time").textContent = `${this._t("selected_image")} ${this._time(activeFrame?.time || context.radarTime?.state, true)}`;
 
     const input = this.shadowRoot.querySelector("input[type='range']");
     input.max = String(Math.max(0, timelineFrames.length - 1));
     input.value = String(this._activeFrame);
     input.disabled = !hasTimeline;
+    input.setAttribute("aria-valuetext", `${this._t(activeFrame?.kind === "forecast" ? "radar_forecast" : "observation")} ${this._time(activeFrame?.time, true)}`);
 
     const playButton = this.shadowRoot.querySelector(".play");
     playButton.disabled = !hasTimeline;
-    playButton.title = this._playing ? "Pause" : "Play";
+    playButton.title = this._t(this._playing ? "pause" : "play");
+    playButton.setAttribute("aria-label", playButton.title);
     playButton.querySelector("ha-icon")?.setAttribute(
       "icon",
       this._playing ? "mdi:pause" : "mdi:play"
@@ -1706,29 +1876,26 @@ class RainRadarCard extends HTMLElement {
   _syncTimelineBand(context) {
     const band = this.shadowRoot.querySelector(".timeline-band");
     const timelineFrames = context.timelineFrames || [];
-    const observed = timelineFrames.length;
-    const forecastMinutes = Number(context.forecastMinutesAvailable) || 0;
-    const hasForecast = this._config.show_forecast && forecastMinutes > 0;
-    band.hidden = !this._config.show_timeline || (observed < 2 && !hasForecast);
+    const observed = timelineFrames.filter((frame) => frame.kind === "observed").length;
+    const forecast = timelineFrames.length - observed;
+    band.hidden = !this._config.show_timeline || timelineFrames.length < 2;
     if (band.hidden) return;
-    band.classList.toggle("has-forecast", hasForecast);
-    band.style.gridTemplateColumns = hasForecast
-      ? `${Math.max(2, observed)}fr minmax(112px, 0.36fr)`
-      : "1fr";
+    band.classList.toggle("has-forecast", forecast > 0);
+    band.style.gridTemplateColumns = forecast > 0 ? `${Math.max(1, observed)}fr ${forecast}fr` : "1fr";
     const observedSegment = band.querySelector(".observed");
     observedSegment.hidden = observed === 0;
-    observedSegment.textContent = observed > 1 ? "Radar frames" : "Radar";
+    observedSegment.textContent = `${this._t("observation")} · ${this._t("now")} ${this._time(new Date())}`;
     const forecastSegment = band.querySelector(".forecast");
-    forecastSegment.hidden = !hasForecast;
-    forecastSegment.textContent = `Forecast data +${forecastMinutes} min`;
-    forecastSegment.title = "Point forecast data, not radar imagery";
+    forecastSegment.hidden = forecast === 0;
+    forecastSegment.textContent = this._t("radar_forecast");
+    forecastSegment.title = this._t("radar_forecast");
   }
 
   _scheduleMapUpdate(context) {
     const token = ++this._mapUpdateToken;
     this._ensureLeafletAndRenderMap(context, token).catch((error) => {
       if (token !== this._mapUpdateToken) return;
-      this._showMapStatus("Map failed to load");
+      this._showMapStatus(this._t("map_failed"));
       // eslint-disable-next-line no-console
       console.debug("Rain Radar map failed to load", error);
     });
@@ -1740,7 +1907,7 @@ class RainRadarCard extends HTMLElement {
 
     container.classList.toggle("hide-provider-legend", !this._config.show_legend);
     this._ensureLeafletCssInShadowRoot();
-    if (!this._map) this._showMapStatus("Loading map");
+    if (!this._map) this._showMapStatus(this._t("map_loading"));
 
     const L = await this._ensureLeaflet();
     if (token !== this._mapUpdateToken) return;
@@ -1769,6 +1936,11 @@ class RainRadarCard extends HTMLElement {
         keyboard: false,
         tap: false,
       });
+      // Additive crossfades must blend only radar images, never map tiles or markers.
+      const radarPane = this._map.createPane("rainRadar");
+      radarPane.style.zIndex = "450";
+      radarPane.style.isolation = "isolate";
+      radarPane.style.pointerEvents = "none";
       this._syncTileLayer(L);
       this._map.attributionControl.addAttribution(
         context.radarMetadata?.attribution || DEFAULT_RADAR_ATTRIBUTION
@@ -1828,7 +2000,7 @@ class RainRadarCard extends HTMLElement {
     }).addTo(this._map);
     this._tileLayer._rainRadarTileUrl = this._config.tile_url;
     this._tileLayer.on("tileerror", () => {
-      this._showMapStatus("Map tiles unavailable");
+      this._showMapStatus(this._t("tiles_unavailable"));
     });
   }
 
@@ -1877,6 +2049,9 @@ class RainRadarCard extends HTMLElement {
       if (!this._locationMarker) {
         this._locationMarker = L.marker(latLng, {
           interactive: false,
+          keyboard: false,
+          title: this._t("location"),
+          alt: this._t("location"),
           icon: L.divIcon({
             className: "rain-location-pin",
             html: "<span></span>",
@@ -1893,7 +2068,7 @@ class RainRadarCard extends HTMLElement {
       this._locationMarker = null;
     }
 
-    if (context.activeFrame?.kind === "forecast" && location) {
+    if (context.activeFrame?.kind === "forecast" && Number.isFinite(context.activeFrame.rate) && location) {
       const color = precipitationColor(context.activeFrame.rate, context.threshold);
       const latLng = [location.latitude, location.longitude];
       if (!this._forecastMarker) {
@@ -1938,27 +2113,39 @@ class RainRadarCard extends HTMLElement {
       coverageOpacity,
       context.radarBounds
     );
-    if (this._radarLayer && this._radarLayerKey === layerKey) {
-      this._radarLayer.setOpacity(1);
-      return;
-    }
+    if (this._pendingOverlay?.key === layerKey) return this._pendingOverlay.promise;
 
     const token = ++this._overlayToken;
+    this._pendingOverlay?.cancel?.();
+    this._pendingOverlay = null;
+    if (this._radarLayer && this._radarLayerKey === layerKey) return;
+
+    const request = { key: layerKey, promise: null, cancel: null };
+    this._pendingOverlay = request;
+    request.promise = this._renderRadarOverlay(L, context, layerKey, token, request)
+      .finally(() => {
+        if (this._pendingOverlay === request) this._pendingOverlay = null;
+      });
+    return request.promise;
+  }
+
+  async _renderRadarOverlay(L, context, layerKey, token, request) {
+    const frame = context.activeFrame;
     if (!this._radarLayer) {
-      this._showMapStatus("Loading radar layer");
+      this._showMapStatus(this._t("radar_loading"));
     }
     let overlayEntry = null;
     try {
       overlayEntry = await this._prepareOverlayUrl(
         layerKey,
-        imageUrl,
-        overlayMode,
-        desiredOpacity,
-        coverageOpacity
+        frame.imageUrl,
+        context.radarMetadata?.overlayMode || "precipitation_mask",
+        this._frameRadarOpacity(frame),
+        this._coverageOpacity()
       );
     } catch (error) {
       if (token === this._overlayToken && !this._radarLayer) {
-        this._showMapStatus("Radar layer unavailable");
+        this._showMapStatus(this._t("radar_unavailable"));
         throw error;
       }
       return;
@@ -1970,12 +2157,13 @@ class RainRadarCard extends HTMLElement {
     const previousLayer = this._radarLayer;
     const nextLayer = L.imageOverlay(overlayEntry.url, leafletBounds(context.radarBounds), {
       opacity: 0,
+      pane: "rainRadar",
       interactive: false,
       className: "rain-radar-overlay",
       attribution: context.radarMetadata?.attribution || DEFAULT_RADAR_ATTRIBUTION,
     });
 
-    const layerLoaded = this._waitForLayerLoad(nextLayer);
+    const layerLoaded = this._waitForLayerLoad(nextLayer, request);
     nextLayer.addTo(this._map);
     try {
       await this._withTimeout(
@@ -1989,7 +2177,7 @@ class RainRadarCard extends HTMLElement {
       } catch (removeError) {
         // Ignore stale Leaflet layers.
       }
-      if (!previousLayer) throw error;
+      if (token === this._overlayToken && !previousLayer) throw error;
       return;
     }
     if (token !== this._overlayToken) {
@@ -2001,39 +2189,62 @@ class RainRadarCard extends HTMLElement {
       return;
     }
 
-    const crossfade = () => {
-      try {
-        nextLayer.setOpacity(1);
-        previousLayer?.setOpacity(0);
-      } catch (error) {
-        // Ignore if Leaflet removed the layer during a fast frame change.
-      }
-    };
-    requestAnimationFrame(crossfade);
-
-    if (previousLayer) {
-      try {
-        window.setTimeout(() => {
-          previousLayer.remove();
-        }, 420);
-      } catch (error) {
-        try {
-          previousLayer.remove();
-        } catch (removeError) {
-          // Ignore stale Leaflet layers.
-        }
-      }
-    }
-
+    this._fadeRadarLayers(nextLayer);
     this._radarLayer = nextLayer;
     this._radarLayerKey = layerKey;
     this._trimOverlayCache([layerKey]);
   }
 
   _overlayLayerKey(overlayMode, imageUrl, radarOpacity, coverageOpacity, bounds) {
-    return `${overlayMode}|${imageUrl}|${radarOpacity.toFixed(2)}|${coverageOpacity.toFixed(
+    // The signed path identifies an immutable frame; renewing access is not new imagery.
+    let imageIdentity = imageUrl;
+    try {
+      const url = new URL(imageUrl, window.location?.href || "http://localhost");
+      url.searchParams.delete("authSig");
+      imageIdentity = url.href;
+    } catch (error) {
+      // Keep unknown URL formats distinct rather than guessing their identity.
+    }
+    return `${overlayMode}|${imageIdentity}|${radarOpacity.toFixed(2)}|${coverageOpacity.toFixed(
       2
     )}|${JSON.stringify(bounds)}`;
+  }
+
+  _radarFadeDurationMs() {
+    return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      ? 0 : Math.min(700, this._animationIntervalMs() * 0.9);
+  }
+
+  _fadeRadarLayers(nextLayer) {
+    if (this._radarFadeAnimation !== null) cancelAnimationFrame(this._radarFadeAnimation);
+    this._radarFadeAnimation = null;
+    const outgoing = [...this._radarBlendLayers];
+    const duration = outgoing.length ? this._radarFadeDurationMs() : 0;
+    this._radarBlendLayers.set(nextLayer, 0);
+    const started = performance.now();
+    const paint = (time) => {
+      const progress = duration ? Math.min(1, Math.max(0, (time - started) / duration)) : 1;
+      // Preserve the currently painted weights when a user skips during a fade.
+      // Together with plus-lighter, their sum stays one: no brightness pulse.
+      for (const [layer, weight] of outgoing) {
+        const opacity = weight * (1 - progress);
+        layer.setOpacity(opacity);
+        this._radarBlendLayers.set(layer, opacity);
+      }
+      nextLayer.setOpacity(progress);
+      this._radarBlendLayers.set(nextLayer, progress);
+      if (progress < 1) {
+        this._radarFadeAnimation = requestAnimationFrame(paint);
+      } else {
+        for (const [layer] of outgoing) {
+          layer.remove();
+          this._radarBlendLayers.delete(layer);
+        }
+        this._radarFadeAnimation = null;
+      }
+    };
+    if (duration) this._radarFadeAnimation = requestAnimationFrame(paint);
+    else paint(started);
   }
 
   async _prepareOverlayUrl(layerKey, imageUrl, overlayMode, radarOpacity, coverageOpacity) {
@@ -2116,10 +2327,14 @@ class RainRadarCard extends HTMLElement {
     });
   }
 
-  _waitForLayerLoad(layer) {
+  _waitForLayerLoad(layer, request) {
     return new Promise((resolve, reject) => {
       layer.once("load", resolve);
       layer.once("error", () => reject(new Error("Radar layer failed to render")));
+      if (request) request.cancel = () => {
+        layer.remove();
+        resolve();
+      };
     });
   }
 
@@ -2146,6 +2361,12 @@ class RainRadarCard extends HTMLElement {
 
   _removeRadarLayer() {
     this._overlayToken += 1;
+    this._pendingOverlay?.cancel?.();
+    this._pendingOverlay = null;
+    if (this._radarFadeAnimation !== null) cancelAnimationFrame(this._radarFadeAnimation);
+    this._radarFadeAnimation = null;
+    this._radarBlendLayers.forEach((_, layer) => layer.remove());
+    this._radarBlendLayers.clear();
     if (this._radarLayer) {
       this._radarLayer.remove();
       this._radarLayer = null;
@@ -2322,15 +2543,165 @@ class RainRadarCard extends HTMLElement {
     return normalized;
   }
 
+  _locale() {
+    return { ...this._hass?.locale, language: this._hass?.locale?.language || this._hass?.language || "en" };
+  }
+
+  _time(value, date = false) {
+    return localTime(value, this._locale(), date);
+  }
+
+  _number(value, suffix = "") {
+    return minuteValue(value) === null ? this._t("unknown") : numberText(value, suffix, this._locale());
+  }
+
+  _arrival(value, resolution) {
+    const minutes = minuteValue(value);
+    if (minutes === null) return this._t("unknown");
+    if (minutes <= 0) return this._t("now");
+    if (resolution >= 60) {
+      const lower = Math.floor(minutes / resolution) * resolution;
+      const upper = lower + resolution;
+      return `${this._t("approximately")} ${this._number(lower / 60)}–${this._number(upper / 60)} h`;
+    }
+    const approximate = "";
+    const rounded = resolution >= 60 ? Math.round(minutes / 60) * 60 : Math.round(minutes);
+    const duration = rounded >= 60 ? `${this._number(Math.floor(rounded / 60))} h${rounded % 60 ? ` ${rounded % 60} min` : ""}` : `${Math.max(1, rounded)} min`;
+    const clock = this._time(new Date(Date.now() + minutes * 60000));
+    const format = this._config.arrival_format;
+    return approximate + (format === "time" ? clock : format === "minutes" ? `${Math.max(1, rounded)} min` :
+      format === "duration_time" || (format === "auto" && rounded >= 60) ? `${duration} (${clock})` : duration);
+  }
+
+  _forecastSummary(frame, threshold) {
+    if (!frame || frame.kind !== "forecast") return "";
+    const rate = minuteValue(frame.rate);
+    if (rate === null) return this._t("radar_forecast");
+    return rate < threshold ? this._t("no_rain_forecast") : `${this._number(rate, " mm/h")} · ${this._t("forecast")}`;
+  }
+
+  _forecastValidity(context) {
+    const precipitation = context.precipitation;
+    const risk = context.risk;
+    const stale = precipitation?.attributes?.is_stale === true || context.main?.attributes?.is_stale === true;
+    const precipitationValue = stale ? null : minuteValue(stateText(precipitation, null));
+    const riskNumber = risk?.attributes?.is_stale === true ? null : minuteValue(stateText(risk, null));
+    const riskValue = riskNumber === 0 && risk?.attributes?.window_complete === false ? null : riskNumber;
+    const rainSoon = stale || (context.main?.state === "off" && precipitation?.attributes?.window_complete === false)
+      ? null : context.main;
+    return {
+      precipitationValue,
+      riskValue,
+      rainSoon,
+      pointData: !stale && precipitation?.state !== "unavailable",
+      arrival: !stale && context.arrival?.attributes?.is_stale !== true && context.arrival?.state !== "unavailable",
+      pointAvailable: precipitationValue !== null || ["on", "off"].includes(rainSoon?.state),
+    };
+  }
+
+  _syncSourceStatus(context, providerName) {
+    for (const [source, label, quality] of [
+      ["radar", this._t("radar"), context.radarStatus],
+      ["forecast", `${providerName} ${this._t("forecast").toLowerCase()}`, context.forecastStatus],
+    ]) {
+      const element = this.shadowRoot.querySelector(`.${source}-health`);
+      const validity = this._forecastValidity(context);
+      const partial = source === "forecast" && quality.status !== "ok" &&
+        (validity.pointAvailable || validity.riskValue !== null);
+      const status = partial ? "partial" : quality.status || (source === "radar" && context.timelineFrames.length ? "ok" : "unknown");
+      const parts = [`${label}: ${this._t(`quality_${status}`)}`];
+      if (partial) {
+        parts.push(this._t(validity.pointAvailable ? "point_available" : "point_unavailable"));
+        parts.push(this._t(validity.riskValue !== null ? "risk_available" : "risk_unavailable"));
+      }
+      if (quality.reason) parts.push(this._t(`reason_${quality.reason}`) === `reason_${quality.reason}` ? this._t("reason_provider") : this._t(`reason_${quality.reason}`));
+      if (source === "radar") {
+        const latest = stateText(context.radarTime, null) || context.timelineFrames.filter((frame) => frame.kind === "observed").at(-1)?.time;
+        if (parseTime(latest)) parts.push(`${this._t("latest_radar")} ${this._time(latest)}`);
+      }
+      if (quality.last_attempt && quality.last_attempt !== quality.last_success && status !== "ok") parts.push(`${this._t("last_attempt")} ${this._time(quality.last_attempt)}`);
+      if (quality.last_success) parts.push(`${this._t("last_fetch")} ${this._time(quality.last_success)}`);
+      if (quality.data_age_seconds != null) parts.push(`${this._t("data_age")} ${this._number(Math.max(0, quality.data_age_seconds / 60))} min`);
+      if (quality.next_retry) parts.push(`${this._t("next_retry")} ${this._time(quality.next_retry)}`);
+      element.textContent = parts.join(" · ");
+      element.dataset.status = status;
+    }
+  }
+
+  _syncLegend(context) {
+    const element = this.shadowRoot.querySelector(".product-legend");
+    element.hidden = this._config.show_legend === false;
+    if (element.hidden) return;
+    const metadata = context.radarMetadata;
+    const scale = metadata.productId?.startsWith("regnradar_") ? [] : metadata.colorScale || [];
+    // Use only the selected provider's scale. Never invent numeric rain intensities.
+    const colors = scale.filter((step) => /^#[0-9a-f]{3,8}$/i.test(step.color || ""));
+    const product = metadata.productId?.startsWith("regnradar_") ? "Regnradar" : metadata.productId === "5level_reflectivity" ? "MET Norway" : this._t("radar");
+    element.innerHTML = `<div>${escapeHtml(product)}</div><div class="swatches">${colors.map((step) => `<span><i style="background:${step.color}"></i>${escapeHtml(step.label)}</span>`).join("")}</div><div>${escapeHtml(this._t(colors.length ? "coverage_legend" : "provider_colors"))}</div>`;
+  }
+
   _t(key) {
-    const lang = (this._hass?.language || globalThis.navigator?.language || "en").toLowerCase();
+    const lang = (this._hass?.locale?.language || this._hass?.language || globalThis.navigator?.language || "en").toLowerCase();
     const translations = {
       en: {
+        quality_partial: "Partially available",
+        point_available: "Short-term forecast available",
+        point_unavailable: "Short-term forecast unavailable",
+        risk_available: "Rain risk data available",
+        risk_unavailable: "Rain risk data unavailable",
+        no_arrival_within: "No rain arrival within",
+        partial_window: "Incomplete time window",
+        reason_stale_data: "The weather data is too old",
+        reason_incomplete_window: "Forecast data does not cover the whole time window",
+        reason_missing_timestamp: "The provider has not supplied an observation time",
+        reason_no_frames: "No radar images are available",
+        reason_missing_data: "Weather data is missing",
+        reason_outside_coverage: "The location is outside the provider coverage",
+        reason_missing_precipitation: "Precipitation values are missing",
+        reason_missing_probability: "Rain probability values are missing",
+        reason_timeout: "The provider did not respond in time",
+        reason_network: "Could not connect to the provider",
+        reason_network_error: "Could not connect to the provider",
+        reason_invalid_response: "The provider returned unreadable data",
+        reason_request_failed: "The provider request failed",
+        last_attempt: "Last attempt",
+        tiles_unavailable: "Map tiles unavailable",
+        radar_loading: "Loading radar layer",
+        radar_unavailable: "Radar layer unavailable",
+        radar: "Radar",
+        observation: "Observation",
+        radar_forecast: "Radar forecast",
+        waiting: "Waiting",
+        now: "Now",
+        selected_image: "Selected image",
+        approximately: "Approximately",
+        pause: "Pause",
+        location: "Selected location",
+        map_failed: "Map failed to load",
+        map_loading: "Loading map",
+        no_rain_forecast: "No rain forecast",
+        threshold_wet: "Rain above the selected threshold expected",
+        threshold_dry: "No rain above the selected threshold expected",
+        threshold_method: "Threshold result, not probability",
+        quality_ok: "Available",
+        quality_stale: "Old data",
+        quality_temporarily_unavailable: "Temporarily unavailable",
+        quality_outside_coverage: "Outside coverage",
+        quality_unknown: "Unknown",
+        last_fetch: "Last successful fetch",
+        data_age: "Data age",
+        next_retry: "Next attempt",
+        reason_server_busy: "Provider is busy",
+        reason_rate_limited: "Provider request limit",
+        reason_metadata_unavailable: "Radar metadata could not be refreshed",
+        reason_provider: "Provider data unavailable or incomplete",
+        coverage_legend: "Shading indicates coverage. Areas without data do not mean no rain.",
+        provider_colors: "Provider radar colours. No verified intensity scale. Shading indicates coverage, not rain.",
         default_title: "Rain risk",
         status: "Status",
         arrival: "Arrival",
         precipitation: "Precipitation",
-        risk: "12h risk",
+        risk: "Rain risk",
         latest_radar: "Latest radar",
         coverage: "Coverage",
         provider: "Provider",
@@ -2356,11 +2727,64 @@ class RainRadarCard extends HTMLElement {
         next_frame: "Next frame",
       },
       sv: {
+        quality_partial: "Delvis tillgänglig",
+        point_available: "Korttidsprognos tillgänglig",
+        point_unavailable: "Korttidsprognos saknas",
+        risk_available: "Regnriskdata tillgängliga",
+        risk_unavailable: "Regnriskdata saknas",
+        no_arrival_within: "Ingen regnankomst inom",
+        partial_window: "Ofullständigt tidsfönster",
+        reason_stale_data: "Väderdata är för gamla",
+        reason_incomplete_window: "Prognosen täcker inte hela tidsfönstret",
+        reason_missing_timestamp: "Leverantören saknar observationstid",
+        reason_no_frames: "Inga radarbilder finns tillgängliga",
+        reason_missing_data: "Väderdata saknas",
+        reason_outside_coverage: "Platsen ligger utanför leverantörens täckning",
+        reason_missing_precipitation: "Nederbördsvärden saknas",
+        reason_missing_probability: "Värden för regnsannolikhet saknas",
+        reason_timeout: "Leverantören svarade inte i tid",
+        reason_network: "Kunde inte ansluta till leverantören",
+        reason_network_error: "Kunde inte ansluta till leverantören",
+        reason_invalid_response: "Leverantören skickade data som inte kunde läsas",
+        reason_request_failed: "Hämtningen från leverantören misslyckades",
+        last_attempt: "Senaste försök",
+        tiles_unavailable: "Kartbilder saknas",
+        radar_loading: "Laddar radarlager",
+        radar_unavailable: "Radarlagret är otillgängligt",
+        radar: "Radar",
+        observation: "Observation",
+        radar_forecast: "Radarprognos",
+        waiting: "Väntar",
+        now: "Nu",
+        selected_image: "Vald bild",
+        approximately: "Cirka",
+        pause: "Pausa",
+        location: "Vald plats",
+        map_failed: "Kartan kunde inte laddas",
+        map_loading: "Laddar karta",
+        no_rain_forecast: "Inget regn väntas",
+        threshold_wet: "Regn över vald tröskel väntas",
+        threshold_dry: "Inget regn över vald tröskel väntas",
+        threshold_method: "Tröskelutfall, inte sannolikhet",
+        quality_ok: "Tillgänglig",
+        quality_stale: "Gamla data",
+        quality_temporarily_unavailable: "Tillfälligt otillgänglig",
+        quality_outside_coverage: "Utanför täckning",
+        quality_unknown: "Okänd",
+        last_fetch: "Senast hämtad",
+        data_age: "Datans ålder",
+        next_retry: "Nästa försök",
+        reason_server_busy: "Leverantören är upptagen",
+        reason_rate_limited: "Leverantörens anropsgräns",
+        reason_metadata_unavailable: "Radarmetadata kunde inte uppdateras",
+        reason_provider: "Leverantörsdata saknas eller är ofullständiga",
+        coverage_legend: "Skuggning visar täckning. Områden utan data betyder inte uppehåll.",
+        provider_colors: "Leverantörens radarfärger. Ingen verifierad intensitetsskala. Skuggning visar täckning, inte regn.",
         default_title: "Risk för regn",
         status: "Status",
         arrival: "Ankomst",
         precipitation: "Nederbörd",
-        risk: "12 h risk",
+        risk: "Regnrisk",
         latest_radar: "Senaste radar",
         coverage: "Täckning",
         provider: "Källa",
@@ -2411,12 +2835,22 @@ class RainRadarCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
-    this._config = this._normalizeConfig(config);
+    const normalized = this._normalizeConfig(config);
+    if (JSON.stringify(normalized) === JSON.stringify(this._config)) return;
+    this._config = normalized;
     this._render();
   }
 
   set hass(hass) {
+    const previousLanguage = this._editorLanguage();
     this._hass = hass;
+    const form = this.shadowRoot.querySelector(".editor-form");
+    if (form && previousLanguage === this._editorLanguage()) {
+      form.hass = hass;
+      return;
+    }
+    // Only a language change replaces the form during HA updates. This also
+    // localizes a form first created by setConfig before hass was available.
     this._render();
   }
 
@@ -2516,7 +2950,7 @@ class RainRadarCardEditor extends HTMLElement {
       <div class="editor">
         <ha-form class="editor-form"></ha-form>
         <div class="meta-fields">
-          <div class="meta-fields-title">Attributes and details</div>
+          <div class="meta-fields-title">${this._editorText("Attributes and details")}</div>
           ${this._metaRowsHtml()}
         </div>
       </div>
@@ -2525,7 +2959,8 @@ class RainRadarCardEditor extends HTMLElement {
     if (form) {
       form.hass = this._hass;
       form.data = this._formData();
-      form.schema = this._formSchema();
+      form.schema = this._formSchema().map((field) => ({ ...field,
+        ...(field.selector?.select ? { selector: { select: { ...field.selector.select, options: field.selector.select.options.map((option) => ({ ...option, label: this._editorText(option.label) })) } } } : {}) }));
       form.computeLabel = this._computeLabel;
       form.addEventListener("value-changed", (event) => this._formValueChanged(event));
     }
@@ -2562,7 +2997,7 @@ class RainRadarCardEditor extends HTMLElement {
         required: true,
         selector: {
           entity: {
-            filter: [{ domain: "binary_sensor" }, { domain: "sensor" }],
+            filter: [{ integration: "rain_radar", domain: "binary_sensor" }, { integration: "rain_radar", domain: "sensor" }],
           },
         },
       },
@@ -2570,7 +3005,7 @@ class RainRadarCardEditor extends HTMLElement {
       { name: "show_icon", label: "Show icon", selector: { boolean: {} } },
       { name: "severity_background", label: "Status background", selector: { boolean: {} } },
       { name: "show_map", label: "Show map", selector: { boolean: {} } },
-      { name: "show_legend", label: "Show attribution details", selector: { boolean: {} } },
+      { name: "show_legend", label: "Show radar legend and attribution", selector: { boolean: {} } },
       { name: "show_info_panel", label: "Show provider info panel", selector: { boolean: {} } },
       { name: "show_location_marker", label: "Show location marker", selector: { boolean: {} } },
       { name: "map_zoom_controls", label: "Show map zoom controls", selector: { boolean: {} } },
@@ -2678,10 +3113,19 @@ class RainRadarCardEditor extends HTMLElement {
     const config = { ...this._config, ...value };
     this._config = config;
     dispatchConfigChanged(this, config);
-    this._render();
   }
 
-  _computeLabel = (schema) => schema.label || schema.name;
+  _editorLanguage() {
+    return (this._hass?.locale?.language || this._hass?.language || "en").toLowerCase().startsWith("sv") ? "sv" : "en";
+  }
+
+  _editorText(value) {
+    const language = this._editorLanguage();
+    const swedish = {"Entity": "Rain Radar-plats (entitet)", "Title": "Rubrik", "Show icon": "Visa ikon", "Status background": "Statusbakgrund", "Show map": "Visa karta", "Show radar legend and attribution": "Visa radarförklaring och källor", "Show provider info panel": "Visa källinformation", "Show location marker": "Visa platsmarkör", "Show map zoom controls": "Visa zoomknappar", "Allow scroll wheel zoom": "Tillåt zoom med rullhjul", "Default zoom": "Standardzoom", "Minimum zoom": "Minsta zoom", "Maximum zoom": "Största zoom", "Forecast window": "Prognosfönster", "Arrival format": "Ankomstformat", "Auto": "Automatiskt", "Minutes": "Minuter", "Hours and minutes": "Timmar och minuter", "Clock time": "Klockslag", "Hours, minutes and time": "Timmar, minuter och klockslag", "Radar opacity": "Radarns opacitet", "Coverage opacity": "Täckningens opacitet", "Animation frame interval (ms)": "Tid mellan bilder (ms)", "Default animation mode": "Animation vid start", "Paused": "Pausad", "Playing": "Spelar", "Map height": "Karthöjd", "Attributes and details": "Attribut och detaljer", "Details": "Detaljer", "Move up": "Flytta upp", "Move down": "Flytta ned", "Status": "Status", "Arrival": "Ankomst", "Precipitation": "Nederbörd", "Rain risk": "Regnrisk", "Latest radar": "Senaste radar", "Coverage": "Täckning", "Provider": "Källa", "Forecast": "Prognos", "Timeline": "Tidslinje", "Map": "Karta"};
+    return language.startsWith("sv") ? swedish[value] || value : value;
+  }
+
+  _computeLabel = (schema) => this._editorText(schema.label || schema.name);
 
   _metaRowsHtml() {
     const order = normalizeMetaOrder(this._config.meta_order);
@@ -2690,10 +3134,10 @@ class RainRadarCardEditor extends HTMLElement {
         if (key === "divider") {
           return `
             <div class="meta-row meta-divider-row">
-              <span>— Details —</span>
+              <span>— ${this._editorText("Details")} —</span>
               <div class="order-actions">
-                <button type="button" class="order-btn" data-move-key="${key}" data-delta="-1" ${index === 0 ? "disabled" : ""}>↑</button>
-                <button type="button" class="order-btn" data-move-key="${key}" data-delta="1" ${index === order.length - 1 ? "disabled" : ""}>↓</button>
+                <button type="button" class="order-btn" aria-label="${this._editorText("Move up")}: ${escapeHtml(this._labelForMeta(key))}" data-move-key="${key}" data-delta="-1" ${index === 0 ? "disabled" : ""}>↑</button>
+                <button type="button" class="order-btn" aria-label="${this._editorText("Move down")}: ${escapeHtml(this._labelForMeta(key))}" data-move-key="${key}" data-delta="1" ${index === order.length - 1 ? "disabled" : ""}>↓</button>
               </div>
             </div>
           `;
@@ -2702,10 +3146,10 @@ class RainRadarCardEditor extends HTMLElement {
           <div class="meta-row">
             <span>${escapeHtml(this._labelForMeta(key))}</span>
             <div class="order-actions">
-              <button type="button" class="order-btn" data-move-key="${key}" data-delta="-1" ${index === 0 ? "disabled" : ""}>↑</button>
-              <button type="button" class="order-btn" data-move-key="${key}" data-delta="1" ${index === order.length - 1 ? "disabled" : ""}>↓</button>
+              <button type="button" class="order-btn" aria-label="${this._editorText("Move up")}: ${escapeHtml(this._labelForMeta(key))}" data-move-key="${key}" data-delta="-1" ${index === 0 ? "disabled" : ""}>↑</button>
+              <button type="button" class="order-btn" aria-label="${this._editorText("Move down")}: ${escapeHtml(this._labelForMeta(key))}" data-move-key="${key}" data-delta="1" ${index === order.length - 1 ? "disabled" : ""}>↓</button>
             </div>
-            <input type="checkbox" data-meta-key="${key}" ${this._isMetaShown(key) ? "checked" : ""}>
+            <input type="checkbox" aria-label="${escapeHtml(this._labelForMeta(key))}" data-meta-key="${key}" ${this._isMetaShown(key) ? "checked" : ""}>
           </div>
         `;
       })
@@ -2740,7 +3184,7 @@ class RainRadarCardEditor extends HTMLElement {
       status: "Status",
       arrival: "Arrival",
       precipitation: "Precipitation",
-      risk: "12h risk",
+      risk: "Rain risk",
       latest_radar: "Latest radar",
       coverage: "Coverage",
       provider: "Provider",
@@ -2748,7 +3192,7 @@ class RainRadarCardEditor extends HTMLElement {
       timeline: "Timeline",
       map: "Map",
     };
-    return labels[key] || key;
+    return this._editorText(labels[key] || key);
   }
 
 }

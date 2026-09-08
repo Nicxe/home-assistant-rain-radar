@@ -15,6 +15,7 @@ from custom_components.rain_radar.providers.models import (
     RadarBounds,
     RadarFrame,
     RadarFrameSet,
+    SourceStatus,
 )
 from custom_components.rain_radar.views import (
     RainRadarFrameImageView,
@@ -49,6 +50,8 @@ def _runtime_data():
         image_cache_key="regnradar_radar_image_test",
     )
     data = SimpleNamespace(
+        radar_status=SourceStatus(status="ok"),
+        forecast_status=SourceStatus(status="ok"),
         provider_status=ProviderStatus(
             provider_id="regnradar",
             provider_name="Regnradar",
@@ -150,3 +153,29 @@ async def test_frame_image_view_fetches_known_frame(
             "https://api.regnradar.se/radar/file/test.png",
         )
     ]
+
+
+async def test_metadata_view_during_reload_returns_controlled_unavailability(
+    hass, rain_radar_config_entry
+):
+    """A registered entry can temporarily lack runtime_data during reload."""
+    rain_radar_config_entry.add_to_hass(hass)
+    assert not hasattr(rain_radar_config_entry, "runtime_data")
+    response = await RainRadarFramesView().get(
+        FakeRequest(hass), rain_radar_config_entry.entry_id
+    )
+    assert response.status == 503
+    assert "temporarily unavailable" in response.text
+
+
+async def test_image_view_during_reload_returns_controlled_unavailability(
+    hass, rain_radar_config_entry
+):
+    """A signed image request during reload must not raise AttributeError."""
+    rain_radar_config_entry.add_to_hass(hass)
+    assert not hasattr(rain_radar_config_entry, "runtime_data")
+    response = await RainRadarFrameImageView().get(
+        FakeRequest(hass), rain_radar_config_entry.entry_id, "previous-frame"
+    )
+    assert response.status == 503
+    assert "temporarily unavailable" in response.text
